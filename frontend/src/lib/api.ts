@@ -1,6 +1,8 @@
-// HTTP client for the Revive backend (API contract v0.1). Base URL comes from NEXT_PUBLIC_API_BASE.
+// HTTP client for the Revive backend (API contract v0.3). Base URL from NEXT_PUBLIC_API_BASE.
 
-import type { Approval, Connection, Investigation, InvestigationEvent, Provider, ReviveClient, StartResponse } from "./types";
+import type {
+  Approval, ApprovalEdits, Connection, Investigation, InvestigationSummary, Provider, ReviveClient,
+} from "./types";
 
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const API = `${API_BASE}/api/v1`;
@@ -22,39 +24,64 @@ const post = (path: string, body: unknown) =>
   fetch(`${API}${path}`, { method: "POST", headers: { ...HEADERS, "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const del = (path: string) => fetch(`${API}${path}`, { method: "DELETE", headers: HEADERS });
 
-const EVENT_NAMES: InvestigationEvent["name"][] = [
-  "customer_resolved", "evidence_source_started", "evidence_source_completed", "diagnosis_started",
-  "diagnosis_completed", "approval_required", "action_executed", "action_verified", "investigation_completed",
+// SSE stream of a live run. Returns an unsubscribe function. EventSource cannot set headers,
+// so the stub user id is passed as a query param (matches the backend's stream endpoints).
+export function streamInvestigation(
+  customer: string,
+  onEvent: (name: string, data: Record<string, unknown>) => void,
+  onError?: (err: unknown) => void,
+): () => void {
+  const url = `${API}/investigations/stream?customer=${encodeURIComponent(customer)}&user_id=${encodeURIComponent(USER_ID)}`;
+  return openStream(url, onEvent, onError);
+}
+
+export function streamResume(
+  investigationId: string,
+  approved: boolean,
+  onEvent: (name: string, data: Record<string, unknown>) => void,
+  onError?: (err: unknown) => void,
+): () => void {
+  const url = `${API}/investigations/${investigationId}/resume-stream?approved=${approved}&user_id=${encodeURIComponent(USER_ID)}`;
+  return openStream(url, onEvent, onError);
+}
+
+const STREAM_EVENTS = [
+  "investigation_started", "customer_resolved", "evidence_collected", "diagnosis_completed",
+  "recoverability_decided", "intervention_selected", "actions_planned", "approval_required",
+  "action_executed", "action_verified", "investigation_completed",
 ];
+
+function openStream(url: string, onEvent: (name: string, data: Record<string, unknown>) => void, onError?: (err: unknown) => void): () => void {
+  const es = new EventSource(url);
+  for (const name of STREAM_EVENTS) {
+    es.addEventListener(name, (ev) => {
+      let data: Record<string, unknown> = {};
+      try { data = (ev as MessageEvent).data ? JSON.parse((ev as MessageEvent).data) : {}; } catch { /* keep empty */ }
+      onEvent(name, data);
+      if (name === "investigation_completed" || name === "approval_required") es.close();
+    });
+  }
+  es.onerror = (e) => onError?.(e);
+  return () => es.close();
+}
 
 export const client: ReviveClient = {
   health: () => get("/health").then((r) => json(r)),
 
-  startInvestigation: (customer): Promise<StartResponse> => post("/investigations", { customer }).then((r) => json(r)),
+  startInvestigation: (customer): Promise<Investigation> =>
+    post("/investigations", { customer }).then((r) => json(r)),
 
   getInvestigation: (id): Promise<Investigation> => get(`/investigations/${id}`).then((r) => json(r)),
 
-  subscribe(id, onEvent, onError) {
-    // EventSource cannot send custom headers, so the stub user header is not sent here.
-    const es = new EventSource(`${API}/investigations/${id}/events`);
-    for (const name of EVENT_NAMES) {
-      es.addEventListener(name, (ev) => {
-        const me = ev as MessageEvent;
-        let data: Record<string, unknown> = {};
-        try { data = me.data ? JSON.parse(me.data) : {}; } catch { /* keep empty */ }
-        onEvent({ id: me.lastEventId || undefined, name, data, at: new Date().toISOString() });
-        if (name === "investigation_completed") es.close();
-      });
-    }
-    es.onerror = (e) => onError?.(e);
-    return () => es.close();
-  },
+  listInvestigations: (): Promise<InvestigationSummary[]> => get("/investigations").then((r) => json(r)),
 
   listApprovals: (): Promise<Approval[]> => get("/approvals").then((r) => json(r)),
 
-  approve: (id, edited) => post(`/approvals/${id}/approve`, edited ? { edited_parameters: edited } : {}).then((r) => json(r)),
+  approve: (investigationId, edits): Promise<Investigation> =>
+    post(`/approvals/${investigationId}/approve`, edits ? { edits } : {}).then((r) => json(r)),
 
-  reject: (id, reason) => post(`/approvals/${id}/reject`, { reason }).then((r) => json(r)),
+  reject: (investigationId, reason): Promise<Investigation> =>
+    post(`/approvals/${investigationId}/reject`, { reason }).then((r) => json(r)),
 
   listConnections: (): Promise<Connection[]> => get("/connections").then((r) => json(r)),
 

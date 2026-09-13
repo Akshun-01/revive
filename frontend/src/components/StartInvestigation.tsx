@@ -20,8 +20,8 @@ export function StartInvestigation() {
     setBusy(true); setError(null);
     try {
       const res = await client.startInvestigation(name);
-      rememberInvestigation({ id: res.investigation_id, customer: name, started_at: new Date().toISOString() });
-      router.push(`/investigations/${res.investigation_id}?customer=${encodeURIComponent(name)}`);
+      rememberInvestigation({ id: res.id, customer: res.customer?.name ?? name, started_at: new Date().toISOString() });
+      router.push(`/investigations/${res.id}?customer=${encodeURIComponent(res.customer?.name ?? name)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setBusy(false);

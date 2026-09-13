@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import type { Investigation, InvestigationEvent } from "@/lib/types";
+import type { Investigation } from "@/lib/types";
 import { client } from "@/lib/api";
 import { CAUSE_LABEL, INTERVENTION_LABEL, RECOVERABILITY_LABEL, STATUS_LABEL, money, pct, shortDate } from "@/lib/labels";
 import { Kpi, Micro, Tag, type Tone } from "./ui";
@@ -16,19 +16,20 @@ const STATUS_TONE: Record<Investigation["status"], Tone> = {
   created: "neutral", running: "blue", waiting_for_approval: "amber", completed: "green", rejected: "red", failed: "red",
 };
 
+const NO_ACTIVE_SOURCES: Set<string> = new Set();
+
 export function Workspace({ id, customerHint }: { id: string; customerHint?: string }) {
   const [inv, setInv] = useState<Investigation | null>(null);
-  const [events, setEvents] = useState<InvestigationEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [hlIds, setHlIds] = useState<Set<string>>(new Set());
-  const lastEventAt = useRef<number>(0);
 
   const refresh = useCallback(async () => {
     try { setInv(await client.getInvestigation(id)); setError(null); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }, [id]);
 
-  // Initial load.
+  // Load the investigation. POST /investigations runs synchronously, so by the time we get
+  // here it is already completed or waiting_for_approval; the audit[] carries the trace.
   useEffect(() => {
     let cancelled = false;
     client.getInvestigation(id)
@@ -36,23 +37,6 @@ export function Workspace({ id, customerHint }: { id: string; customerHint?: str
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
     return () => { cancelled = true; };
   }, [id]);
-
-  // SSE subscription; every event triggers a refetch of the full object.
-  useEffect(() => {
-    const unsub = client.subscribe(id, (e) => {
-      lastEventAt.current = Date.now();
-      setEvents((prev) => (e.id && prev.some((x) => x.id === e.id) ? prev : [...prev, e]));
-      void refresh();
-    }, () => { /* fall through to polling */ });
-    return unsub;
-  }, [id, refresh]);
-
-  // Polling fallback while running and the stream is quiet.
-  useEffect(() => {
-    if (!inv || (inv.status !== "running" && inv.status !== "created")) return;
-    const t = setInterval(() => { if (Date.now() - lastEventAt.current > 2500) void refresh(); }, 1500);
-    return () => clearInterval(t);
-  }, [inv, refresh]);
 
   const hl = useMemo<Highlight>(() => ({
     ids: hlIds,
@@ -64,15 +48,6 @@ export function Workspace({ id, customerHint }: { id: string; customerHint?: str
       el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
     },
   }), [hlIds]);
-
-  const activeSources = useMemo(() => {
-    const s = new Set<string>();
-    for (const e of events) {
-      if (e.name === "evidence_source_started") s.add(String(e.data.source));
-      if (e.name === "evidence_source_completed") s.delete(String(e.data.source));
-    }
-    return s;
-  }, [events]);
 
   const c = inv?.customer;
   const status = inv?.status ?? null;
@@ -111,10 +86,10 @@ export function Workspace({ id, customerHint }: { id: string; customerHint?: str
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
         <aside className="lg:sticky lg:top-6 lg:self-start">
-          <Timeline events={events} status={status} />
+          <Timeline audit={inv?.audit ?? []} status={status} />
         </aside>
         <div className="flex min-w-0 flex-col gap-5">
-          <EvidenceSection evidence={inv?.evidence ?? []} hl={hl} activeSources={activeSources} />
+          <EvidenceSection evidence={inv?.evidence ?? []} hl={hl} activeSources={NO_ACTIVE_SOURCES} />
           <CauseSection diagnosis={inv?.diagnosis ?? null} hl={hl} warnings={inv?.warnings ?? []} />
           <RecoverabilitySection r={inv?.recoverability ?? null} hl={hl} />
           <InterventionSection i={inv?.intervention ?? null} hl={hl} />

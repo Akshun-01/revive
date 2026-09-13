@@ -14,18 +14,11 @@ export function ApprovalPanel({ action, investigationId, onDone }: { action: Act
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function resolveApprovalId(): Promise<string> {
-    const list = await client.listApprovals();
-    const mine = list.find((a) => a.investigation_id === investigationId && a.status === "pending") ?? list.find((a) => a.action.id === action.id);
-    if (!mine) throw new Error("No pending approval found for this investigation");
-    return mine.id;
-  }
-
+  // The approval is keyed by investigation_id; edits are keyed by the action id.
   async function approve() {
     setBusy(true); setErr(null);
     try {
-      const id = await resolveApprovalId();
-      await client.approve(id, body !== p.body ? { body } : undefined);
+      await client.approve(investigationId, body !== p.body ? { [action.id]: { body } } : undefined);
       onDone();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -33,8 +26,7 @@ export function ApprovalPanel({ action, investigationId, onDone }: { action: Act
   async function reject() {
     setBusy(true); setErr(null);
     try {
-      const id = await resolveApprovalId();
-      await client.reject(id, reason || "Rejected by operator");
+      await client.reject(investigationId, reason || "Rejected by operator");
       onDone();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
@@ -56,7 +48,7 @@ export function ApprovalPanel({ action, investigationId, onDone }: { action: Act
           </div>
           <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={9}
             className="w-full resize-y border border-line-2 bg-surface p-3 font-mono text-[12.5px] leading-relaxed outline-none focus:border-ink" />
-          <div className="mt-1 text-[11.5px] text-ink-3">Edit the draft before approving. Edits are sent as <code className="num">edited_parameters</code>.</div>
+          <div className="mt-1 text-[11.5px] text-ink-3">Edit the draft before approving. Edits are sent as <code className="num">edits</code>.</div>
         </div>
         <div className="flex flex-col gap-2 border-l border-line pl-5">
           <Micro className="mb-1">Risk</Micro>

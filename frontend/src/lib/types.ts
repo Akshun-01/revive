@@ -107,41 +107,44 @@ export interface VerificationResult {
   verified_at: string;
 }
 
+// Ordered, persisted investigation trace (the audit[] field). Drives the timeline.
+export type AuditEventType =
+  | "customer_resolved" | "evidence_source_completed" | "diagnosis_completed"
+  | "recoverability_decided" | "intervention_selected" | "approval_required"
+  | "action_executed" | "action_verified";
+
+export interface AuditEvent {
+  seq?: number;
+  event_type: AuditEventType | string;
+  payload: Record<string, unknown>;
+  at: string | null;
+}
+
 export interface Investigation {
   id: string;
   status: InvestigationStatus;
   customer: Customer | null;
   revenue_impact: number | null;
   evidence: Evidence[];
+  evidence_sources?: Record<string, string>;
   diagnosis: Diagnosis | null;
   recoverability: RecoverabilityDecision | null;
   intervention: Intervention | null;
   actions: Action[];
   verification: VerificationResult[];
   pending_action: Action | null;
+  audit: AuditEvent[];
   warnings: string[];
-  created_at: string;
+  created_at: string | null;
   completed_at: string | null;
 }
 
+// GET /approvals returns one entry per paused investigation. The approval is keyed by
+// its investigation_id.
 export interface Approval {
-  id: string;
   investigation_id: string;
-  action: Action;
-  status: ApprovalStatus;
-  created_at: string;
-}
-
-export type EventName =
-  | "customer_resolved" | "evidence_source_started" | "evidence_source_completed"
-  | "diagnosis_started" | "diagnosis_completed" | "approval_required"
-  | "action_executed" | "action_verified" | "investigation_completed";
-
-export interface InvestigationEvent {
-  id?: string; // sequence id when the transport provides one; used for de-duplication
-  name: EventName;
-  data: Record<string, unknown>;
-  at: string; // client receive time, ISO
+  customer: string | null;
+  pending_action: Action;
 }
 
 export type Provider = "stripe" | "hubspot" | "slack";
@@ -155,20 +158,32 @@ export interface Connection {
   updated_at: string;
 }
 
-export interface StartResponse {
-  investigation_id: string;
+// Summary row from GET /investigations (list).
+export interface InvestigationSummary {
+  id: string;
+  customer_name: string | null;
   status: InvestigationStatus;
+  revenue_impact: number | null;
+  primary_cause: CauseCategory | null;
+  recoverability: Recoverability | null;
+  intervention: InterventionType | null;
+  created_at: string | null;
+  completed_at: string | null;
 }
+
+// Per-action parameter edits applied on approval: { action_id: { param: value } }.
+export type ApprovalEdits = Record<string, Record<string, unknown>>;
 
 export interface ReviveClient {
   health(): Promise<{ status: string; data_source?: string; llm_provider?: string }>;
-  startInvestigation(customer: string): Promise<StartResponse>;
+  /** POST /investigations runs synchronously and returns the full investigation. */
+  startInvestigation(customer: string): Promise<Investigation>;
   getInvestigation(id: string): Promise<Investigation>;
-  /** Subscribe to the SSE stream. Returns an unsubscribe function. */
-  subscribe(id: string, onEvent: (e: InvestigationEvent) => void, onError?: (err: unknown) => void): () => void;
+  listInvestigations(): Promise<InvestigationSummary[]>;
   listApprovals(): Promise<Approval[]>;
-  approve(id: string, editedParameters?: Record<string, unknown>): Promise<{ id: string; status: ApprovalStatus }>;
-  reject(id: string, reason: string): Promise<{ id: string; status: ApprovalStatus }>;
+  /** Approve the pending action of a paused investigation; returns the completed investigation. */
+  approve(investigationId: string, edits?: ApprovalEdits): Promise<Investigation>;
+  reject(investigationId: string, reason: string): Promise<Investigation>;
   listConnections(): Promise<Connection[]>;
   /** Create or update the connection for a provider. The secret is sent once and never returned. */
   connect(provider: Provider, credentials: Record<string, string>, scopes?: string[]): Promise<Connection>;
