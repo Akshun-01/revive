@@ -45,17 +45,16 @@ services:
       postgres:
         condition: service_healthy
 
-  # Public HTTPS for the backend.
-  #  - No token  -> ephemeral quick tunnel (random *.trycloudflare.com, URL in the logs).
-  #  - Named tunnel (stable, e.g. api.revive.log0.in): set CLOUDFLARE_TUNNEL_TOKEN and
-  #    CLOUDFLARE_TUNNEL_ARGS=run in the repo-root .env. See docs/DEPLOY.md.
+  # Public HTTPS for the backend via the named "revive" tunnel -> https://api.revive.log0.in.
+  # Credentials-file method (no Zero Trust / credit card): routing in backend/cloudflared/config.yml,
+  # secret <tunnel-id>.json beside it (gitignored). See docs/DEPLOY.md to recreate on another host.
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: revive-tunnel
     restart: unless-stopped
-    command: tunnel --no-autoupdate ${CLOUDFLARE_TUNNEL_ARGS:---url http://backend:8000}
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./backend/cloudflared:/etc/cloudflared:ro
     depends_on:
       - backend
 

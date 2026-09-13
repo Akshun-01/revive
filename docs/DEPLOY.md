@@ -28,34 +28,35 @@ Services: `postgres` (5433 on host), `backend` (8000 on host + inside the tunnel
   Environment Variables, then deploy. `NEXT_PUBLIC_*` is inlined at build time, so changing
   it needs a redeploy.
 
-## Stable named tunnel: https://api.revive.log0.in
+## Stable named tunnel: https://revive-api.log0.in
 
-`trycloudflare.com` URLs change every restart. For a stable URL (and Vercel), use a named
-tunnel on your Cloudflare domain (`log0.in` is already active). Dashboard token method - no
-cert files, works cleanly in Docker:
+`trycloudflare.com` URLs change every restart. For a stable URL (and Vercel) we use a named
+tunnel on the `log0.in` Cloudflare domain via the **credentials-file** method - no Zero Trust /
+credit card, just `cloudflared login` (once) + a credentials JSON. This is already set up; the
+compose `cloudflared` service runs it from `backend/cloudflared/`.
 
-1. Cloudflare dashboard -> **Zero Trust** -> **Networks** -> **Tunnels** -> **Create a tunnel**
-   -> **Cloudflared** -> name it `revive` -> **Save**.
-2. On the connector screen, copy the **token** (the long string after `--token` in the shown
-   `cloudflared ... run --token <TOKEN>` command). Ignore the install command itself.
-3. Open the tunnel's **Public Hostname** tab -> **Add a public hostname**:
-   - Subdomain: `api.revive`  ·  Domain: `log0.in`  ·  Path: empty
-   - Service: **HTTP**  ·  URL: `backend:8000`   (cloudflared reaches the backend by its
-     compose service name)
-   - Save. Cloudflare auto-creates the `api.revive.log0.in` DNS record.
-4. In the **repo-root** `.env` (copy from `.env.example`):
-   ```
-   CLOUDFLARE_TUNNEL_ARGS=run
-   CLOUDFLARE_TUNNEL_TOKEN=<paste the token>
-   ```
-5. Bring the tunnel up:
-   ```bash
-   docker compose up -d cloudflared
-   curl https://api.revive.log0.in/api/v1/health
-   ```
+Files: `backend/cloudflared/config.yml` (committed, the ingress) and
+`backend/cloudflared/<tunnel-id>.json` (the secret credentials, gitignored).
 
-Now `https://api.revive.log0.in` is permanent - set it once in Vercel and in
-`frontend/.env.local`. To go back to a quick tunnel, blank both vars and re-up.
+**Single-level subdomain matters:** Cloudflare's free Universal SSL covers `log0.in` and
+`*.log0.in` (one level) only. A deeper name like `api.revive.log0.in` fails TLS, so we use
+`revive-api.log0.in`.
+
+To recreate on another machine (or after deleting the tunnel):
+
+```bash
+cloudflared login                                  # browser auth, pick log0.in (no card)
+cloudflared tunnel create revive                   # writes ~/.cloudflared/<id>.json
+cloudflared tunnel route dns revive revive-api.log0.in
+cp ~/.cloudflared/<id>.json backend/cloudflared/
+# set tunnel id + credentials-file path in backend/cloudflared/config.yml
+docker compose up -d cloudflared
+curl https://revive-api.log0.in/api/v1/health
+```
+
+`https://revive-api.log0.in` is permanent - set it as `NEXT_PUBLIC_API_BASE` in Vercel and in
+`frontend/.env.local`. To fall back to a quick tunnel, swap the compose `cloudflared` command
+back to `tunnel --no-autoupdate --url http://backend:8000` and drop the volume.
 
 ## LLM latency vs determinism
 

@@ -1,0 +1,11 @@
+# Named tunnel "revive" -> revive-api.log0.in -> the backend container.
+# Single-level subdomain: Cloudflare's free Universal SSL covers log0.in + *.log0.in only,
+# so a deeper name like api.revive.log0.in would fail TLS. Credentials-file method (created
+# via `cloudflared tunnel create revive`); no Zero Trust / card. <tunnel-id>.json is gitignored.
+tunnel: edb6f557-fc8c-42cc-a94a-c16f62dcd044
+credentials-file: /etc/cloudflared/edb6f557-fc8c-42cc-a94a-c16f62dcd044.json
+
+ingress:
+  - hostname: revive-api.log0.in
+    service: http://backend:8000
+  - service: http_status:404
