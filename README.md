@@ -1,4 +1,4 @@
-# Revive - AI-Powered Revenue Recovery Agent
+# Revive: AI-Powered Revenue Recovery Agent
 
 > A B2B SaaS customer didn't renew. You instantly know **how much** you lost - but not **why**, whether recovery is even rational, or **what to do next**. Revive investigates the lost renewal
 > across Stripe, HubSpot, Slack and product usage, builds an **evidence-backed** diagnosis, decides whether recovery is worth it, recommends and **executes** the right action with a
@@ -7,12 +7,14 @@
 **Live demo:** Frontend → https://revive-ai-revops.vercel.app · Backend API → https://revive-api.log0.in
 · MCP server → `https://revive-api.log0.in/mcp`
 
-## 📺 Two-minute demo
+## 📺 Demo Video
 
 <!-- Replace VIDEO_ID with the unlisted YouTube id. The thumbnail below previews on GitHub and
      links to the video (GitHub sanitizes <iframe>, so a linked thumbnail is the way to embed). -->
 
-▶️ **Watch the 2-minute demo:** [www.youtube.com/watch?v=_r6Dh5byE9c](https://www.youtube.com/watch?v=_r6Dh5byE9c)
+[![Watch the demo video](https://img.youtube.com/vi/bF9EFCnGOHA/0.jpg)](https://www.youtube.com/watch?v=bF9EFCnGOHA)
+
+▶️ **Watch the demo video:** [https://youtu.be/bF9EFCnGOHA](https://www.youtube.com/watch?v=bF9EFCnGOHA)
 
 ---
 
