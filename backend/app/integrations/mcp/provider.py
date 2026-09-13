@@ -173,10 +173,20 @@ class LiveProviderBundle:
         self.behavior = None  # Userlens: optional, phase 2
 
 
-def _token(creds: dict[str, str] | None) -> str | None:
+def _resolve_endpoint(
+    creds: dict[str, str] | None, provider: ConnectionProvider
+) -> tuple[str | None, str | None]:
+    """Pick the MCP (url, token) for a provider from its stored credentials.
+
+    `base_url` in the connection wins - this is how an Arga twin is wired: the Twin Run
+    returns a per-service URL + credential, which the user saves as the connection's
+    base_url + token. Falls back to the hosted default URL when base_url is absent.
+    """
     if not creds:
-        return None
-    return creds.get("token") or creds.get("api_key")
+        return None, None
+    token = creds.get("token") or creds.get("api_key")
+    url = creds.get("base_url") or DEFAULT_MCP_URLS.get(provider.value) or ""
+    return (url or None), (token or None)
 
 
 async def build_live_bundle(user_id: str) -> LiveProviderBundle:
@@ -194,9 +204,8 @@ async def build_live_bundle(user_id: str) -> LiveProviderBundle:
             creds = await manager.get_credentials(user_id, provider)
         except Exception:  # noqa: BLE001 - missing key / not connected -> no client
             creds = None
-        token = _token(creds)
-        url = DEFAULT_MCP_URLS.get(provider.value) or ""
-        if not token or not url:
+        url, token = _resolve_endpoint(creds, provider)
+        if not url or not token:
             return None
         return McpClient(url, token=token)
 

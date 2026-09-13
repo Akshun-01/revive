@@ -92,3 +92,22 @@ async def test_missing_connection_degrades():
     assert await SlackLiveProvider(None).collect_evidence("x") == []
     result = await HubSpotLiveProvider(None).create_task("c", "t", "b", None)
     assert result.success is False and "not connected" in result.message
+
+
+def test_resolve_endpoint():
+    from app.domain.models.connection import ConnectionProvider
+    from app.integrations.mcp.provider import _resolve_endpoint
+
+    # Arga twin: base_url in the connection wins.
+    url, token = _resolve_endpoint(
+        {"base_url": "https://twin.argalabs.com/stripe/abc", "token": "arga_x"},
+        ConnectionProvider.STRIPE,
+    )
+    assert url == "https://twin.argalabs.com/stripe/abc" and token == "arga_x"
+
+    # No base_url: falls back to the hosted default; api_key accepted as token.
+    url, token = _resolve_endpoint({"api_key": "sk_live"}, ConnectionProvider.STRIPE)
+    assert url == "https://mcp.stripe.com" and token == "sk_live"
+
+    # No connection: nothing to build.
+    assert _resolve_endpoint(None, ConnectionProvider.SLACK) == (None, None)
