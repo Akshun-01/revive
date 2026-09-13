@@ -1,7 +1,7 @@
 // HTTP client for the Revive backend (API contract v0.3). Base URL from NEXT_PUBLIC_API_BASE.
 
 import type {
-  Approval, ApprovalEdits, Connection, Investigation, InvestigationSummary, Provider, ReviveClient,
+  Approval, Connection, CustomerSummary, Investigation, InvestigationSummary, Provider, ReviveClient,
 } from "./types";
 
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000").replace(/\/$/, "");
@@ -14,7 +14,9 @@ const HEADERS = { "X-User-Id": USER_ID };
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText}${text ? `: ${text.slice(0, 200)}` : ""}`);
+    let detail = text;
+    try { const parsed = JSON.parse(text); if (parsed && typeof parsed.detail === "string") detail = parsed.detail; } catch { /* not JSON */ }
+    throw new Error(detail ? detail.slice(0, 300) : `${res.status} ${res.statusText}`);
   }
   return res.json() as Promise<T>;
 }
@@ -72,6 +74,8 @@ export const client: ReviveClient = {
     post("/investigations", { customer }).then((r) => json(r)),
 
   getInvestigation: (id): Promise<Investigation> => get(`/investigations/${id}`).then((r) => json(r)),
+
+  listCustomers: (): Promise<CustomerSummary[]> => get("/customers").then((r) => json(r)),
 
   listInvestigations: (): Promise<InvestigationSummary[]> => get("/investigations").then((r) => json(r)),
 

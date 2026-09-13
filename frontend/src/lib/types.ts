@@ -159,6 +159,21 @@ export interface Connection {
 }
 
 // Summary row from GET /investigations (list).
+export interface CustomerSummary {
+  id: string;
+  name: string;
+  annual_revenue: number | string | null;
+  currency: string | null;
+  renewal_date: string | null;
+  renewal_status: string | null;
+  owner_name: string | null;
+  source: "seed" | "stripe" | string;
+  last_investigation: {
+    id: string; status: InvestigationStatus; primary_cause: CauseCategory | null;
+    recoverability: Recoverability | null; intervention: InterventionType | null; completed_at: string | null;
+  } | null;
+}
+
 export interface InvestigationSummary {
   id: string;
   customer_name: string | null;
@@ -175,10 +190,12 @@ export interface InvestigationSummary {
 export type ApprovalEdits = Record<string, Record<string, unknown>>;
 
 export interface ReviveClient {
-  health(): Promise<{ status: string; data_source?: string; llm_provider?: string }>;
+  health(): Promise<{ status: string; data_source?: string; llm_provider?: string; persistence?: "postgres" | "memory"; llm_enabled?: boolean }>;
   /** POST /investigations runs synchronously and returns the full investigation. */
   startInvestigation(customer: string): Promise<Investigation>;
   getInvestigation(id: string): Promise<Investigation>;
+  /** Lost / at-risk renewals worth investigating (seed fixtures, or Stripe in live mode). */
+  listCustomers(): Promise<CustomerSummary[]>;
   listInvestigations(): Promise<InvestigationSummary[]>;
   listApprovals(): Promise<Approval[]>;
   /** Approve the pending action of a paused investigation; returns the completed investigation. */

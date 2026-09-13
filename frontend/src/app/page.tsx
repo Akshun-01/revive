@@ -1,4 +1,5 @@
 import { Micro } from "@/components/ui";
+import { LostRenewals } from "@/components/LostRenewals";
 import { StartInvestigation } from "@/components/StartInvestigation";
 import { RecentInvestigations } from "@/components/RecentInvestigations";
 
@@ -8,7 +9,7 @@ export default function Home() {
       <div className="mb-8 flex flex-col gap-3">
         <Micro>Non-renewal recovery</Micro>
         <h1 className="max-w-[24ch] text-[34px] font-semibold leading-[1.08] tracking-tight">
-          A customer didn&apos;t renew. Find out why, and whether it&apos;s worth chasing.
+          These customers didn&apos;t renew. Find out why, and whether they&apos;re worth chasing.
         </h1>
         <p className="max-w-[64ch] text-[14.5px] leading-relaxed text-ink-2">
           Revive reads Stripe, HubSpot, Slack and Userlens, builds an evidence chain, names the cause, decides if recovery is
@@ -16,6 +17,7 @@ export default function Home() {
         </p>
       </div>
       <div className="flex flex-col gap-5">
+        <LostRenewals />
         <StartInvestigation />
         <RecentInvestigations />
       </div>
