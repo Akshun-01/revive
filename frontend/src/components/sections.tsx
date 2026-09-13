@@ -39,19 +39,23 @@ export function EvidenceSection({ evidence, hl, loading, sources }: { evidence: 
         {grouped.map(({ source, items }) => {
           const status = sources?.[source];
           const unavailable = !loading && typeof status === "string" && status.startsWith("error");
+          const comingSoon = source === "userlens"; // integration not live yet - shown as coming soon
           return (
-          <div key={source} className="border border-line">
+          <div key={source} className={clsx("border border-line", comingSoon && "opacity-70")}>
             <div className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2">
               <SourceMark source={source} />
               <span className="text-[12.5px] font-medium">{SOURCE_LABEL[source]}</span>
               <span className="micro">{SOURCE_ROLE[source]}</span>
-              <span className="ml-auto micro">{items.length ? `${items.length}` : loading ? <span className="pulse">querying</span> : unavailable ? <span className="text-amber">unavailable</span> : "—"}</span>
+              {comingSoon && <Tag tone="amber">coming soon</Tag>}
+              <span className="ml-auto micro">{comingSoon ? <span className="text-amber">soon</span> : items.length ? `${items.length}` : loading ? <span className="pulse">querying</span> : unavailable ? <span className="text-amber">unavailable</span> : "—"}</span>
             </div>
             <ul className="divide-y divide-line">
-              {items.length === 0 && (loading
-                ? <li className="p-3"><Skeleton lines={2} /></li>
-                : <li className="p-3 text-[12px] text-ink-3">{unavailable ? "Source unavailable for this run." : "No evidence from this source."}</li>)}
-              {items.map((e) => {
+              {comingSoon
+                ? <li className="p-3 text-[12px] text-ink-3">Product-behavior signals (usage &amp; adoption) — <span className="text-amber">coming soon</span>.</li>
+                : items.length === 0 && (loading
+                  ? <li className="p-3"><Skeleton lines={2} /></li>
+                  : <li className="p-3 text-[12px] text-ink-3">{unavailable ? "Source unavailable for this run." : "No evidence from this source."}</li>)}
+              {!comingSoon && items.map((e) => {
                 const on = hl.ids.has(e.id);
                 return (
                   <li key={e.id} id={`ev-${e.id}`}
