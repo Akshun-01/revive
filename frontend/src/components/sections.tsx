@@ -30,22 +30,27 @@ const ORDER: EvidenceSource[] = ["stripe", "hubspot", "userlens", "slack"];
 
 // ---------------------------------------------------------------- evidence
 
-export function EvidenceSection({ evidence, hl, activeSources }: { evidence: Evidence[]; hl: Highlight; activeSources: Set<string> }) {
+export function EvidenceSection({ evidence, hl, loading, sources }: { evidence: Evidence[]; hl: Highlight; loading: boolean; sources?: Record<string, string> }) {
   const grouped = ORDER.map((s) => ({ source: s, items: evidence.filter((e) => e.source === s) }));
   const any = hl.ids.size > 0;
   return (
     <Panel title="Evidence chain" meta={`${evidence.length} items · 4 sources`} id="evidence">
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {grouped.map(({ source, items }) => (
+        {grouped.map(({ source, items }) => {
+          const status = sources?.[source];
+          const unavailable = !loading && typeof status === "string" && status.startsWith("error");
+          return (
           <div key={source} className="border border-line">
             <div className="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2">
               <SourceMark source={source} />
               <span className="text-[12.5px] font-medium">{SOURCE_LABEL[source]}</span>
               <span className="micro">{SOURCE_ROLE[source]}</span>
-              <span className="ml-auto micro">{items.length ? `${items.length}` : activeSources.has(source) ? <span className="pulse">querying</span> : "—"}</span>
+              <span className="ml-auto micro">{items.length ? `${items.length}` : loading ? <span className="pulse">querying</span> : unavailable ? <span className="text-amber">unavailable</span> : "—"}</span>
             </div>
             <ul className="divide-y divide-line">
-              {items.length === 0 && <li className="p-3"><Skeleton lines={2} /></li>}
+              {items.length === 0 && (loading
+                ? <li className="p-3"><Skeleton lines={2} /></li>
+                : <li className="p-3 text-[12px] text-ink-3">{unavailable ? "Source unavailable for this run." : "No evidence from this source."}</li>)}
               {items.map((e) => {
                 const on = hl.ids.has(e.id);
                 return (
@@ -67,7 +72,8 @@ export function EvidenceSection({ evidence, hl, activeSources }: { evidence: Evi
               })}
             </ul>
           </div>
-        ))}
+          );
+        })}
       </div>
     </Panel>
   );

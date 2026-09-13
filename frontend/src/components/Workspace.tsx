@@ -16,8 +16,6 @@ const STATUS_TONE: Record<Investigation["status"], Tone> = {
   created: "neutral", running: "blue", waiting_for_approval: "amber", completed: "green", rejected: "red", failed: "red",
 };
 
-const NO_ACTIVE_SOURCES: Set<string> = new Set();
-
 export function Workspace({ id, customerHint }: { id: string; customerHint?: string }) {
   const [inv, setInv] = useState<Investigation | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +87,7 @@ export function Workspace({ id, customerHint }: { id: string; customerHint?: str
           <Timeline audit={inv?.audit ?? []} status={status} />
         </aside>
         <div className="flex min-w-0 flex-col gap-5">
-          <EvidenceSection evidence={inv?.evidence ?? []} hl={hl} activeSources={NO_ACTIVE_SOURCES} />
+          <EvidenceSection evidence={inv?.evidence ?? []} hl={hl} loading={inv === null} sources={inv?.evidence_sources} />
           <CauseSection diagnosis={inv?.diagnosis ?? null} hl={hl} warnings={inv?.warnings ?? []} />
           <RecoverabilitySection r={inv?.recoverability ?? null} hl={hl} />
           <InterventionSection i={inv?.intervention ?? null} hl={hl} />
