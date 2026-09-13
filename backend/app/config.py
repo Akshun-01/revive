@@ -79,5 +79,9 @@ class Settings(BaseSettings):
     # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     secret_key: str | None = None
 
+    # Arga Labs control MCP (twin/scenario orchestration). The API key is read from env
+    # ARGA_API_KEY directly (like HF_TOKEN). See docs/ARGA-integration.md.
+    arga_mcp_url: str = "https://api.argalabs.com/mcp"
+
 
 settings = Settings()
