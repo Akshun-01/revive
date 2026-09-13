@@ -20,7 +20,13 @@ export function ApprovalsInbox() {
     catch (e) { setState({ kind: "error", message: e instanceof Error ? e.message : String(e) }); }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let alive = true;
+    client.listApprovals()
+      .then((items) => { if (alive) setState({ kind: "ready", items }); })
+      .catch((e) => { if (alive) setState({ kind: "error", message: e instanceof Error ? e.message : String(e) }); });
+    return () => { alive = false; };
+  }, []);
 
   async function act(a: Approval, approve: boolean) {
     setBusy(a.investigation_id);

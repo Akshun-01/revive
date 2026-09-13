@@ -18,7 +18,13 @@ export function IntegrationsSettings() {
     catch (e) { setState({ kind: "error", message: e instanceof Error ? e.message : String(e) }); }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    let alive = true;
+    client.listConnections()
+      .then((connections) => { if (alive) setState({ kind: "ready", connections }); })
+      .catch((e) => { if (alive) setState({ kind: "error", message: e instanceof Error ? e.message : String(e) }); });
+    return () => { alive = false; };
+  }, []);
 
   async function connect(provider: Provider, credentials: Record<string, string>) {
     await client.connect(provider, credentials);

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import type { AuditEvent, InvestigationStatus } from "@/lib/types";
 import { streamInvestigation } from "@/lib/api";
-import { rememberInvestigation } from "@/lib/recent";
 import { Timeline } from "./Timeline";
 import { Micro } from "./ui";
 
@@ -16,6 +15,7 @@ export function LiveRun({ customer }: { customer: string }) {
   const router = useRouter();
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [id, setId] = useState<string | null>(null);
   const idRef = useRef<string | null>(null);
   const doneRef = useRef(false);
 
@@ -24,7 +24,7 @@ export function LiveRun({ customer }: { customer: string }) {
     const stop = streamInvestigation(customer, (name, data) => {
       if (name === "investigation_started") {
         idRef.current = String(data.id ?? "");
-        if (idRef.current) rememberInvestigation({ id: idRef.current, customer, started_at: new Date().toISOString() });
+        setId(idRef.current || null);
       }
       setEvents((prev) => [...prev, { event_type: name, payload: data, at: new Date().toISOString() }]);
       if (name === "investigation_completed" || name === "approval_required") {
@@ -46,8 +46,8 @@ export function LiveRun({ customer }: { customer: string }) {
       <Timeline audit={events} status={"running" as InvestigationStatus} />
       {error && (
         <div className="mt-4 border border-red bg-red-bg px-4 py-2 text-[13px] text-red">
-          {error} {idRef.current
-            ? <button className="underline" onClick={() => router.replace(`/investigations/${idRef.current}`)}>Open investigation</button>
+          {error} {id
+            ? <button className="underline" onClick={() => router.replace(`/investigations/${id}`)}>Open investigation</button>
             : <button className="underline" onClick={() => router.replace("/")}>Back</button>}
         </div>
       )}
