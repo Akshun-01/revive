@@ -1,0 +1,68 @@
+// HTTP client for the Revive backend (API contract v0.1). Base URL comes from NEXT_PUBLIC_API_BASE.
+
+import type { Approval, Connection, Investigation, InvestigationEvent, Provider, ReviveClient, StartResponse } from "./types";
+
+export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000").replace(/\/$/, "");
+const API = `${API_BASE}/api/v1`;
+
+// Stub auth until real per-user auth lands: a fixed user id on every request.
+export const USER_ID = process.env.NEXT_PUBLIC_USER_ID ?? "demo-user";
+const HEADERS = { "X-User-Id": USER_ID };
+
+async function json<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText}${text ? `: ${text.slice(0, 200)}` : ""}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+const get = (path: string) => fetch(`${API}${path}`, { headers: HEADERS, cache: "no-store" });
+const post = (path: string, body: unknown) =>
+  fetch(`${API}${path}`, { method: "POST", headers: { ...HEADERS, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const del = (path: string) => fetch(`${API}${path}`, { method: "DELETE", headers: HEADERS });
+
+const EVENT_NAMES: InvestigationEvent["name"][] = [
+  "customer_resolved", "evidence_source_started", "evidence_source_completed", "diagnosis_started",
+  "diagnosis_completed", "approval_required", "action_executed", "action_verified", "investigation_completed",
+];
+
+export const client: ReviveClient = {
+  health: () => get("/health").then((r) => json(r)),
+
+  startInvestigation: (customer): Promise<StartResponse> => post("/investigations", { customer }).then((r) => json(r)),
+
+  getInvestigation: (id): Promise<Investigation> => get(`/investigations/${id}`).then((r) => json(r)),
+
+  subscribe(id, onEvent, onError) {
+    // EventSource cannot send custom headers, so the stub user header is not sent here.
+    const es = new EventSource(`${API}/investigations/${id}/events`);
+    for (const name of EVENT_NAMES) {
+      es.addEventListener(name, (ev) => {
+        const me = ev as MessageEvent;
+        let data: Record<string, unknown> = {};
+        try { data = me.data ? JSON.parse(me.data) : {}; } catch { /* keep empty */ }
+        onEvent({ id: me.lastEventId || undefined, name, data, at: new Date().toISOString() });
+        if (name === "investigation_completed") es.close();
+      });
+    }
+    es.onerror = (e) => onError?.(e);
+    return () => es.close();
+  },
+
+  listApprovals: (): Promise<Approval[]> => get("/approvals").then((r) => json(r)),
+
+  approve: (id, edited) => post(`/approvals/${id}/approve`, edited ? { edited_parameters: edited } : {}).then((r) => json(r)),
+
+  reject: (id, reason) => post(`/approvals/${id}/reject`, { reason }).then((r) => json(r)),
+
+  listConnections: (): Promise<Connection[]> => get("/connections").then((r) => json(r)),
+
+  connect: (provider: Provider, credentials, scopes = []): Promise<Connection> =>
+    post("/connections", { provider, credentials, scopes }).then((r) => json(r)),
+
+  async disconnect(provider: Provider) {
+    const r = await del(`/connections/${provider}`);
+    if (!r.ok && r.status !== 404) await json(r); // 404 = already gone, treat as success
+  },
+};
