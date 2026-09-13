@@ -6,6 +6,7 @@ import type { Investigation, InvestigationEvent } from "@/lib/types";
 import { client } from "@/lib/api";
 import { CAUSE_LABEL, INTERVENTION_LABEL, RECOVERABILITY_LABEL, STATUS_LABEL, money, pct, shortDate } from "@/lib/labels";
 import { Kpi, Micro, Tag, type Tone } from "./ui";
+import { ApprovalPanel } from "./ApprovalPanel";
 import { Timeline } from "./Timeline";
 import { ActionsSection, CauseSection, EvidenceSection, InterventionSection, RecoverabilitySection, type Highlight } from "./sections";
 
@@ -106,6 +107,7 @@ export function Workspace({ id, customerHint }: { id: string; customerHint?: str
         <Kpi label="Intervention" value={inv?.intervention ? <span className="text-[18px]">{INTERVENTION_LABEL[inv.intervention.type]}</span> : <span className="pulse text-ink-3">—</span>} sub={inv?.intervention ? `${inv.actions.filter((a) => a.status === "verified").length} of ${inv.actions.length} actions verified` : "pending"} />
       </div>
 
+      {inv?.pending_action && <ApprovalPanel action={inv.pending_action} investigationId={inv.id} onDone={refresh} />}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[300px_1fr]">
         <aside className="lg:sticky lg:top-6 lg:self-start">
