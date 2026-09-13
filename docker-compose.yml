@@ -1,0 +1,30 @@
+# Revive local infrastructure.
+# Postgres backs LangGraph checkpoints (durable investigation state) and future app tables.
+# Data persists in the named volume across restarts.
+#
+#   docker compose up -d        # start
+#   docker compose down         # stop (keeps data)
+#   docker compose down -v      # stop and wipe data
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: revive-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: revive
+      POSTGRES_PASSWORD: revive
+      POSTGRES_DB: revive
+    # Host 5433 -> container 5432 (host 5432 is often taken by a local Postgres install).
+    ports:
+      - "5433:5432"
+    volumes:
+      - revive_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U revive -d revive"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  revive_pgdata:
