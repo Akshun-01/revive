@@ -22,7 +22,17 @@ import uvicorn
 def main() -> None:
     host = os.getenv("REVIVE_HOST", "127.0.0.1")
     port = int(os.getenv("REVIVE_PORT", "8000"))
-    config = uvicorn.Config("app.main:app", host=host, port=port, loop="none", log_level="info")
+    # Trust the proxy's forwarded headers (X-Forwarded-Proto) so behind Cloudflare/TLS
+    # termination the app knows it is https and emits https redirects (e.g. /mcp -> /mcp/).
+    config = uvicorn.Config(
+        "app.main:app",
+        host=host,
+        port=port,
+        loop="none",
+        log_level="info",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
     server = uvicorn.Server(config)
     asyncio.run(server.serve())
 
