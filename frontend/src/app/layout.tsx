@@ -17,7 +17,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <header className="border-b border-line bg-surface">
-          <div className="mx-auto flex h-12 max-w-[1440px] items-center justify-between px-6">
+          <div className="mx-auto flex h-12 max-w-[1440px] items-center justify-between gap-6 px-6">
             <Link href="/" className="flex items-center gap-3">
               <span className="inline-block h-3 w-3 bg-ink" aria-hidden />
               <span className="text-[15px] font-semibold tracking-tight">Revive</span>
@@ -25,6 +25,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             </Link>
             <nav className="flex items-center gap-6 text-[13px] text-ink-2">
               <Link href="/" className="hover:text-ink">Investigations</Link>
+              <Link href="/settings/integrations" className="hover:text-ink">Integrations</Link>
               <BackendStatus />
             </nav>
           </div>
