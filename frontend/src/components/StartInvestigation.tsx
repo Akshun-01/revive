@@ -3,29 +3,21 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { ArrowRight, Loader2 } from "lucide-react";
-import { client } from "@/lib/api";
-import { rememberInvestigation } from "@/lib/recent";
 import { Button, Micro } from "./ui";
 
 export function StartInvestigation() {
   const router = useRouter();
   const [customer, setCustomer] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function submit(e: FormEvent) {
+  function submit(e: FormEvent) {
     e.preventDefault();
     const name = customer.trim();
     if (!name || busy) return;
-    setBusy(true); setError(null);
-    try {
-      const res = await client.startInvestigation(name);
-      rememberInvestigation({ id: res.id, customer: res.customer?.name ?? name, started_at: new Date().toISOString() });
-      router.push(`/investigations/${res.id}?customer=${encodeURIComponent(res.customer?.name ?? name)}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
-    }
+    setBusy(true);
+    // The live page opens the SSE stream, which starts the investigation and reveals the
+    // trace as it runs, then hands off to the workspace on completion / approval.
+    router.push(`/investigations/live?customer=${encodeURIComponent(name)}`);
   }
 
   return (
@@ -42,7 +34,6 @@ export function StartInvestigation() {
           Investigate
         </Button>
       </div>
-      {error && <div className="border-t border-red bg-red-bg px-5 py-2 text-[12.5px] text-red">{error}</div>}
     </form>
   );
 }

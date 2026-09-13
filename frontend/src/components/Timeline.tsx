@@ -14,10 +14,13 @@ function describe(e: AuditEvent): { who: string; what: string } {
       const src = SOURCE_LABEL[d.source as keyof typeof SOURCE_LABEL] ?? String(d.source);
       return { who: src, what: d.status === "ok" ? "Evidence collected" : String(d.status ?? "no data") };
     }
+    case "evidence_collected": return { who: "Agent", what: `Collected evidence from ${d.count ?? 0} source${d.count === 1 ? "" : "s"}` };
     case "diagnosis_completed": return { who: "Agent", what: `Cause: ${String(d.primary_cause ?? "").replace(/_/g, " ")} (${Math.round(Number(d.confidence ?? 0) * 100)}%)` };
     case "recoverability_decided": return { who: "Agent", what: `Recoverability: ${String(d.decision ?? "").replace(/_/g, " ")} (${Math.round(Number(d.confidence ?? 0) * 100)}%)` };
     case "intervention_selected": return { who: "Agent", what: `Intervention: ${String(d.type ?? "").replace(/_/g, " ")}` };
+    case "actions_planned": return { who: "Agent", what: `Planned ${d.count ?? 0} recovery action${d.count === 1 ? "" : "s"}` };
     case "approval_required": return { who: "Policy", what: "Approval required for external action" };
+    case "investigation_completed": return { who: "Agent", what: `Investigation ${d.status ?? "complete"}` };
     case "action_executed": return { who: "Agent", what: d.success ? `Executed action → ${d.ref ?? ""}` : `Action failed (${d.action_id ?? ""})` };
     case "action_verified": return { who: "Agent", what: d.verified ? "Verified against source system" : "Verification failed" };
     default: return { who: "Agent", what: String(e.event_type).replace(/_/g, " ") };
