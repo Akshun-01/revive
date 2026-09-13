@@ -144,6 +144,17 @@ export interface InvestigationEvent {
   at: string; // client receive time, ISO
 }
 
+export type Provider = "stripe" | "hubspot" | "slack";
+
+export interface Connection {
+  id: string;
+  provider: Provider;
+  status: string;
+  scopes: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface StartResponse {
   investigation_id: string;
   status: InvestigationStatus;
@@ -158,4 +169,8 @@ export interface ReviveClient {
   listApprovals(): Promise<Approval[]>;
   approve(id: string, editedParameters?: Record<string, unknown>): Promise<{ id: string; status: ApprovalStatus }>;
   reject(id: string, reason: string): Promise<{ id: string; status: ApprovalStatus }>;
+  listConnections(): Promise<Connection[]>;
+  /** Create or update the connection for a provider. The secret is sent once and never returned. */
+  connect(provider: Provider, credentials: Record<string, string>, scopes?: string[]): Promise<Connection>;
+  disconnect(provider: Provider): Promise<void>;
 }

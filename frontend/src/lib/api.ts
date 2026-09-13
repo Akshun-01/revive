@@ -1,6 +1,6 @@
 // HTTP client for the Revive backend (API contract v0.1). Base URL comes from NEXT_PUBLIC_API_BASE.
 
-import type { Approval, Investigation, InvestigationEvent, ReviveClient, StartResponse } from "./types";
+import type { Approval, Connection, Investigation, InvestigationEvent, Provider, ReviveClient, StartResponse } from "./types";
 
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000").replace(/\/$/, "");
 const API = `${API_BASE}/api/v1`;
@@ -20,6 +20,7 @@ async function json<T>(res: Response): Promise<T> {
 const get = (path: string) => fetch(`${API}${path}`, { headers: HEADERS, cache: "no-store" });
 const post = (path: string, body: unknown) =>
   fetch(`${API}${path}`, { method: "POST", headers: { ...HEADERS, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const del = (path: string) => fetch(`${API}${path}`, { method: "DELETE", headers: HEADERS });
 
 const EVENT_NAMES: InvestigationEvent["name"][] = [
   "customer_resolved", "evidence_source_started", "evidence_source_completed", "diagnosis_started",
@@ -55,4 +56,13 @@ export const client: ReviveClient = {
 
   reject: (id, reason) => post(`/approvals/${id}/reject`, { reason }).then((r) => json(r)),
 
+  listConnections: (): Promise<Connection[]> => get("/connections").then((r) => json(r)),
+
+  connect: (provider: Provider, credentials, scopes = []): Promise<Connection> =>
+    post("/connections", { provider, credentials, scopes }).then((r) => json(r)),
+
+  async disconnect(provider: Provider) {
+    const r = await del(`/connections/${provider}`);
+    if (!r.ok && r.status !== 404) await json(r); // 404 = already gone, treat as success
+  },
 };
