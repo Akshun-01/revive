@@ -54,11 +54,16 @@ psycopg's async driver requires.
 ```bash
 cd backend
 uv sync --extra dev --extra db
-uv run uvicorn app.main:app --reload
+uv run python -m scripts.serve     # http://127.0.0.1:8000 (Swagger at /docs, MCP at /mcp)
 # health: GET http://127.0.0.1:8000/api/v1/health
 
 # vertical slice against seed data:
 uv run python -m scripts.run_slice
-# 5-scenario eval:
+# 5-scenario eval report:
+uv run python -m scripts.run_eval
+# tests:
 uv run pytest -q
 ```
+
+Use `scripts.serve` (not `uvicorn` directly): on Windows uvicorn forces a ProactorEventLoop,
+but psycopg's async driver needs a SelectorEventLoop, which the serve entrypoint sets.
