@@ -1,0 +1,2 @@
+# Repo-root env for docker-compose interpolation (Cloudflare tunnel token, etc.).
+.env
