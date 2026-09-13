@@ -7,5 +7,5 @@ credentials-file: /etc/cloudflared/edb6f557-fc8c-42cc-a94a-c16f62dcd044.json
 
 ingress:
   - hostname: revive-api.log0.in
-    service: http://backend:8000
+    service: http://host.docker.internal:8000
   - service: http_status:404

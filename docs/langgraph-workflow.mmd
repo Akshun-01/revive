@@ -1,0 +1,35 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	resolve_customer(resolve_customer)
+	collect_evidence(collect_evidence)
+	normalize_evidence(normalize_evidence)
+	diagnose(diagnose)
+	assess_recoverability(assess_recoverability)
+	select_intervention(select_intervention)
+	plan_actions(plan_actions)
+	approval(approval)
+	execute_actions(execute_actions)
+	verify_actions(verify_actions)
+	finalize(finalize)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> resolve_customer;
+	approval --> execute_actions;
+	assess_recoverability --> select_intervention;
+	collect_evidence --> normalize_evidence;
+	diagnose --> assess_recoverability;
+	execute_actions --> verify_actions;
+	normalize_evidence --> diagnose;
+	plan_actions --> approval;
+	resolve_customer -. &nbsp;end&nbsp; .-> __end__;
+	resolve_customer -. &nbsp;collect&nbsp; .-> collect_evidence;
+	select_intervention --> plan_actions;
+	verify_actions --> finalize;
+	finalize --> __end__;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

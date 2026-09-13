@@ -48,14 +48,13 @@ flowchart TB
         DOMAIN["Domain Tool Layer"]
 
         DB[("PostgreSQL")]
-        REDIS[("Redis")]
         LS["LangSmith"]
     end
 
-    STRIPE["Stripe MCP"]
-    HUBSPOT["HubSpot MCP"]
-    SLACK["Slack MCP"]
-    USERLENS["Userlens Adapter"]
+    STRIPE["Stripe (MCP / API)"]
+    HUBSPOT["HubSpot (MCP / API)"]
+    SLACK["Slack (MCP / API)"]
+    USERLENS["Userlens (coming soon)"]
 
     UI --> API
     EXT --> MCP
@@ -74,7 +73,6 @@ flowchart TB
     SERVICES --> DB
     AGENT --> DB
     AGENT --> LS
-    API --> REDIS
 ```
 
 ---
@@ -137,16 +135,22 @@ FastAPI owns the HTTP application.
 Example API surface:
 
 ```text
+GET  /api/v1/health
 POST /api/v1/investigations
+GET  /api/v1/investigations
 GET  /api/v1/investigations/{id}
-GET  /api/v1/investigations/{id}/events
+GET  /api/v1/investigations/stream                 (SSE: start + stream)
+GET  /api/v1/investigations/{id}/resume-stream     (SSE: resume + stream)
 POST /api/v1/investigations/{id}/resume
 
 GET  /api/v1/approvals
 POST /api/v1/approvals/{id}/approve
 POST /api/v1/approvals/{id}/reject
 
-GET  /api/v1/health
+GET  /api/v1/customers                              (book of business: lost / at-risk renewals)
+GET  /api/v1/connections
+POST /api/v1/connections
+DELETE /api/v1/connections/{provider}
 ```
 
 FastMCP is mounted into the same ASGI application.
@@ -176,29 +180,19 @@ Both interfaces eventually call the same application services.
 
 ## 6. Public Revive MCP Tools
 
-Keep the public MCP surface small and business-oriented.
-
-### Investigation
+Keep the public MCP surface small and business-oriented. The implemented tools are:
 
 ```text
-revive.investigate_customer
-revive.get_investigation
-revive.get_evidence
-revive.get_recovery_recommendation
+investigate_customer(customer)
+get_investigation_result(investigation_id)
+list_recent_investigations()
+resume_recovery(investigation_id, approved, edits?)
 ```
 
-### Actions
-
-```text
-revive.execute_recovery
-revive.verify_recovery
-```
-
-Potential later tool:
-
-```text
-revive.list_pending_approvals
-```
+`investigate_customer` runs the full workflow and returns the structured result (including a
+`pending_action` and `waiting_for_approval` status when a customer-facing action needs sign-off);
+`resume_recovery` approves or rejects that pending action. All four call the same application
+services as the REST API.
 
 Do not expose vendor-specific tools such as `stripe_api_read` or `search_slack` through the public Revive MCP.
 
@@ -323,38 +317,25 @@ flowchart TD
 The graph state should contain structured application state.
 
 ```python
-class ReviveState(TypedDict):
+class ReviveState(TypedDict, total=False):
     investigation_id: str
-
     customer_query: str
-    customer_id: str | None
+    user_id: str                 # whose connections to use in live mode
+    created_at: str
 
     customer: CustomerContext | None
-
     evidence: list[Evidence]
-    evidence_sources: dict[str, EvidenceStatus]
+    evidence_sources: dict[str, str]     # source -> "ok" | "empty" | "error: ..."
 
-    financial_state: FinancialState | None
-    crm_state: CRMState | None
-    communication_state: CommunicationState | None
-    behavior_state: BehaviorState | None
-
-    hypotheses: list[CauseHypothesis]
-
-    primary_cause: CauseHypothesis | None
+    diagnosis: Diagnosis | None
     recoverability: RecoverabilityDecision | None
+    intervention: Intervention | None
 
-    recommended_intervention: Intervention | None
-
-    pending_action: Action | None
-    approval_status: ApprovalStatus | None
-
-    executed_actions: list[ActionResult]
+    actions: list[Action]
+    action_results: list[ActionResult]
     verification_results: list[VerificationResult]
 
-    confidence: float
     warnings: list[str]
-
     status: InvestigationStatus
 ```
 
@@ -689,21 +670,16 @@ flowchart LR
     REST["FastAPI Routes"]
     MCP["FastMCP Tools"]
 
-    REST --> SERVICES["Application Services"]
-    MCP --> SERVICES
-
-    SERVICES --> INV["InvestigationService"]
-    SERVICES --> REC["RecoveryService"]
-    SERVICES --> APP["ApprovalService"]
-    SERVICES --> VER["VerificationService"]
+    REST --> INV["InvestigationService"]
+    MCP --> INV
 
     INV --> GRAPH["LangGraph"]
-    REC --> GRAPH
-    APP --> GRAPH
-    VER --> GRAPH
+    REST --> CM["ConnectionManager"]
 ```
 
-This keeps transport concerns separate from business logic.
+`InvestigationService` is the single entry point behind both transports (start, resume, get, list,
+and the SSE streams); `ConnectionManager` handles encrypted per-user provider credentials. This keeps
+transport concerns separate from business logic.
 
 ---
 
@@ -742,43 +718,18 @@ The agent therefore remains independent of vendor-specific tool names.
 
 ## 21. Database
 
-Use PostgreSQL as the primary database.
-
-Core tables:
-
-```text
-organizations
-users
-connections
-
-customers
-
-investigations
-investigation_runs
-
-evidence
-cause_hypotheses
-recommendations
-
-actions
-approvals
-verification_results
-
-audit_events
-```
-
-PostgreSQL also stores durable application state and LangGraph checkpoints.
-
-Redis is optional and used for:
+PostgreSQL is the only stateful dependency. It stores both the LangGraph checkpoints (durable graph
+state, keyed by investigation id) and the queryable application tables:
 
 ```text
-Caching
-Rate limiting
-Short-lived locks
-Temporary state
+investigations     summary + full result JSON per investigation
+audit_events       the ordered investigation trace
+connections        per-user provider credentials (Fernet-encrypted)
 ```
 
-Redis is not part of the correctness path.
+The checkpoint tables are managed by the LangGraph Postgres checkpointer; the application tables are
+managed with SQLAlchemy. There is no Redis: the system has no cache or coordination requirement on the
+correctness path.
 
 ---
 
@@ -887,42 +838,37 @@ Pydantic v2
 ```text
 LangGraph
 LangChain
-LangSmith
+langchain-huggingface   (LLM reasoning)
+LangSmith               (tracing)
 ```
 
 ### MCP
 
 ```text
-FastMCP
-Stripe MCP
-HubSpot Remote MCP
-Slack MCP
+FastMCP                 (Revive MCP server + upstream MCP client)
+Stripe MCP / API
+HubSpot MCP / API
+Slack MCP / API
+Arga Labs               (service twins for live tool validation)
 ```
 
 ### Database
 
 ```text
 PostgreSQL
-SQLAlchemy 2
-asyncpg
-Alembic
+SQLAlchemy 2 (asyncpg)
+psycopg                 (LangGraph Postgres checkpointer)
+cryptography (Fernet)   (credential encryption)
 ```
-
-### Cache / coordination
-
-```text
-Redis
-```
-
-Optional for MVP.
 
 ### Frontend
 
 ```text
-Next.js
+Next.js 16 (App Router)
+React 19
 TypeScript
-Tailwind CSS
-shadcn/ui
+Tailwind CSS v4
+lucide-react
 ```
 
 ### Transport
@@ -936,9 +882,9 @@ MCP over HTTP
 ### Deployment
 
 ```text
-Docker
-FastAPI + FastMCP
-PostgreSQL
+Docker            (Postgres + backend + tunnel)
+Cloudflare Tunnel (public HTTPS for the backend)
+Vercel            (frontend)
 ```
 
 ---
@@ -946,73 +892,35 @@ PostgreSQL
 ## 26. Suggested Repository Structure
 
 ```text
-revive/
-├── app/
-│   ├── main.py
-│   │
-│   ├── api/
-│   │   ├── routes/
-│   │   │   ├── investigations.py
-│   │   │   ├── approvals.py
-│   │   │   ├── runs.py
-│   │   │   └── health.py
-│   │   └── dependencies.py
-│   │
-│   ├── mcp/
-│   │   ├── server.py
-│   │   ├── tools/
-│   │   │   ├── investigation.py
-│   │   │   ├── recovery.py
-│   │   │   └── verification.py
-│   │   └── auth.py
-│   │
-│   ├── agent/
-│   │   ├── graph.py
-│   │   ├── state.py
-│   │   ├── nodes/
-│   │   │   ├── resolve_customer.py
-│   │   │   ├── collect_evidence.py
-│   │   │   ├── analyze_cause.py
-│   │   │   ├── assess_recoverability.py
-│   │   │   ├── recommend.py
-│   │   │   ├── approval.py
-│   │   │   ├── execute.py
-│   │   │   └── verify.py
-│   │   └── prompts/
-│   │
-│   ├── domain/
-│   │   ├── investigation.py
-│   │   ├── evidence.py
-│   │   ├── recovery.py
-│   │   ├── actions.py
-│   │   └── policies.py
-│   │
-│   ├── integrations/
-│   │   ├── stripe/
-│   │   │   └── mcp_client.py
-│   │   ├── hubspot/
-│   │   │   └── mcp_client.py
-│   │   ├── slack/
-│   │   │   └── mcp_client.py
-│   │   └── userlens/
-│   │       └── adapter.py
-│   │
-│   ├── persistence/
-│   │   ├── models.py
-│   │   ├── repositories.py
-│   │   └── checkpointer.py
-│   │
-│   ├── evaluation/
-│   │   ├── scenarios.py
-│   │   ├── assertions.py
-│   │   └── metrics.py
-│   │
-│   └── config.py
-│
-├── tests/
-├── scripts/
-├── Dockerfile
-├── pyproject.toml
+Revive/
+├── backend/
+│   ├── app/
+│   │   ├── main.py              # FastAPI + FastMCP mounted at /mcp
+│   │   ├── config.py
+│   │   ├── api/routes/          # health, investigations, approvals, connections, customers
+│   │   ├── mcp/server.py        # Revive MCP server (4 curated tools)
+│   │   ├── agent/               # state.py, nodes.py, graph.py, llm.py, prompts.py
+│   │   ├── domain/
+│   │   │   ├── models/          # customer, evidence, diagnosis, recovery, action, connection
+│   │   │   ├── services/        # investigation, connection_manager
+│   │   │   └── policies/        # action_policy
+│   │   ├── integrations/
+│   │   │   ├── base.py          # provider Protocols
+│   │   │   ├── factory.py
+│   │   │   ├── seed/            # deterministic fixtures + provider
+│   │   │   ├── mcp/             # McpClient + live providers
+│   │   │   └── arga/            # Arga Labs twin orchestrator
+│   │   ├── persistence/         # checkpoint, db, models, repositories
+│   │   └── evaluation/          # scenarios, metrics, runner
+│   ├── scripts/                 # serve, run_slice, run_eval, run_live, arga_twin
+│   ├── tests/
+│   ├── docs/                    # API.md, ARGA-integration.md
+│   ├── Dockerfile
+│   └── pyproject.toml
+├── frontend/                    # Next.js 16 investigation workspace (Vercel)
+├── docs/                        # DEPLOY.md, langgraph-workflow.png
+├── docker-compose.yml           # Postgres + backend + Cloudflare tunnel
+├── PRD.md / HLD.md / LLD.md
 └── README.md
 ```
 

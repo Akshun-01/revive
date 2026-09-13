@@ -1,39 +1,96 @@
-# Revive frontend
+# Revive Frontend
 
-Investigation workspace for the Revive revenue-recovery agent. Next.js 16, TypeScript, Tailwind v4.
+The investigation workspace for [Revive](../README.md), the AI revenue-recovery agent. A Next.js app where a Customer Success / RevOps user starts an investigation into a lost renewal, watches the
+agent work in real time, reviews the evidence-backed diagnosis, and approves recovery actions.
 
-```bash
-npm install
-cp .env.example .env.local     # set NEXT_PUBLIC_API_BASE to the backend
-npm run dev                    # http://localhost:3000
+**Live:** https://revive-ai-revops.vercel.app
+
+## Features
+
+- **Book of business.** A prioritized list of lost / at-risk renewals worth investigating (seed fixtures, or live from Stripe subscriptions in live mode).
+- **Live investigation.** Starting an investigation streams the agent's trace over SSE: resolving the customer, querying each system, diagnosing, deciding recoverability, then handing off to the full workspace.
+- **Evidence chain.** Evidence grouped by source (Stripe, HubSpot, Slack, Userlens) with support/contradiction tags; hovering an evidence chip on a conclusion highlights the exact items that back it.
+- **Verdict + reasoning.** Revenue impact, primary cause with confidence, recoverability decision, recommended intervention, and the alternatives considered.
+- **Human-in-the-loop approvals.** External / financial actions surface an approval panel (and a dedicated `/approvals` inbox). The draft is editable; nothing reaches a customer without sign-off. Actions then show as executed and verified.
+- **Integrations.** Connect Stripe / HubSpot / Slack by pasting a token. Tokens are sent once to the backend, encrypted there, and never shown again.
+- **Theme-aware, responsive** UI with a considered type and color system.
+
+## Tech stack
+
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · lucide-react. No data-fetching library: a small typed client in `src/lib/api.ts` wraps the backend REST + SSE endpoints.
+
+## Project structure
+
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── page.tsx                       # home: start + book of business + recent
+│   │   ├── investigations/live/page.tsx   # live SSE run, then hands off to the workspace
+│   │   ├── investigations/[id]/page.tsx   # full investigation workspace
+│   │   ├── approvals/page.tsx             # pending-approvals inbox
+│   │   ├── settings/integrations/page.tsx # connect Stripe / HubSpot / Slack
+│   │   └── layout.tsx                     # shell, nav, backend status badge
+│   ├── components/                        # Workspace, LiveRun, Timeline, sections,
+│   │   │                                  # ApprovalPanel, ApprovalsInbox, LostRenewals,
+│   │   │                                  # ConnectionCard, IntegrationsSettings, ui, ...
+│   └── lib/
+│       ├── api.ts                         # typed backend client (REST + SSE)
+│       ├── types.ts                       # types mirroring the backend API contract
+│       ├── labels.ts                      # enum -> human labels, formatters
+│       └── providers.ts                   # per-provider connect config
+├── .env.example
+└── package.json
 ```
 
-The backend must allow CORS from `http://localhost:3000`.
+## Getting started
 
-## What it does
+### Prerequisites
 
-- **Home**: start an investigation by customer name, plus a list of investigations started from this browser.
-- **Investigation page**: live trace from the SSE stream, evidence chain grouped by source, root cause with alternatives, recoverability with factors, recommended intervention, and actions with verification. Evidence ids referenced by the diagnosis are live links into the evidence grid.
-- **Approval**: when the backend pauses with a `pending_action`, an approval panel shows the drafted message, editable before approving. Reject records a reason.
-- **Settings, Integrations**: connect Stripe, HubSpot and Slack by pasting a token. Tokens go to `POST /connections` once and are never displayed or stored client-side.
+- Node.js 20+
+- A running Revive backend (see [`../backend/README.md`](../backend/README.md)), local or the deployed URL
 
-## Structure
+### Install and run
 
-- `src/lib/types.ts`: the API contract (v0.1), enum strings verbatim.
-- `src/lib/api.ts`: HTTP client. `fetch` for REST, `EventSource` for `/events`.
-- `src/lib/labels.ts`: enum display labels and number/date formatting.
-- `src/lib/recent.ts`: recent investigations kept in `localStorage`.
-- `src/lib/providers.ts`: per-provider connect-form configuration.
-- `src/components/Workspace.tsx`: the investigation page. Subscribes to `/events`, refetches the investigation on every event, polls as a fallback while running.
-- `src/components/sections.tsx`: evidence, cause, recoverability, intervention and actions panels.
-- `src/components/ApprovalPanel.tsx`: human approval for external actions.
-- `src/components/IntegrationsSettings.tsx`, `ConnectionCard.tsx`: the integrations page.
-- `src/components/ui.tsx`: primitives (panel, tag, KPI, meter, button).
+```bash
+cd frontend
+cp .env.example .env.local
+npm install
+npm run dev            # http://localhost:3000
+```
 
-## Contract notes for the backend
+### Environment
 
-- Every request carries `X-User-Id` (stub auth, `NEXT_PUBLIC_USER_ID`, default `demo-user`). `EventSource` cannot set headers, so `/events` is requested without it.
-- Every SSE event should carry an `id:` line; the client de-duplicates on it after reconnects.
-- The approval panel resolves the approval id via `GET /approvals` filtered by `investigation_id`, then calls `approve` with `edited_parameters` only when the draft was changed.
-- An action with `status: "rejected"` and a `result` on a non-approval action is rendered as "suppressed" (the already-handled case).
-- `DELETE /connections/{provider}` returning `404` is treated as success (already disconnected).
+| Variable                 | Default                   | Purpose                                                                                                                              |
+| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `NEXT_PUBLIC_API_BASE` | `http://127.0.0.1:8000` | Backend base URL; the client appends`/api/v1`. Use the deployed backend URL for a hosted frontend.                                 |
+| `NEXT_PUBLIC_USER_ID`  | `demo-user`             | Stub auth: sent as`X-User-Id` (and as a query param on SSE streams). Keep in sync with the backend user whose connections you use. |
+
+`NEXT_PUBLIC_*` values are inlined at build time, so changing them requires a rebuild / redeploy.
+
+## Scripts
+
+```bash
+npm run dev      # dev server
+npm run build    # production build (type-checks the whole app)
+npm run start    # serve the production build
+npm run lint     # eslint
+```
+
+## Backend contract
+
+The client in `src/lib/api.ts` and the types in `src/lib/types.ts` mirror the backend API
+(`../backend/docs/API.md`). Key endpoints used:
+
+- `GET /health`, `GET /customers`, `GET/POST /investigations`, `GET /investigations/{id}`
+- `GET /investigations/stream`, `GET /investigations/{id}/resume-stream` (SSE)
+- `GET /approvals`, `POST /approvals/{id}/approve|reject`, `POST /investigations/{id}/resume`
+- `GET/POST/DELETE /connections`
+
+The backend enables permissive CORS, so the deployed frontend can call the deployed backend directly.
+
+## Deployment (Vercel)
+
+1. Import the repo into Vercel with the `frontend/` directory as the project root.
+2. Set `NEXT_PUBLIC_API_BASE` to your backend URL (for example `https://revive-api.log0.in`) and `NEXT_PUBLIC_USER_ID`.
+3. Deploy. Because these are build-time values, redeploy after changing them.

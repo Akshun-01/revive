@@ -1,1482 +1,687 @@
+# Revive Low-Level Design (LLD)
 
-Yes. We should make the LLD concrete enough that we can move directly into implementation without making architectural decisions while coding.
+## 1. Overview
 
-I would structure the LLD around **six contracts**:
+This document describes how Revive is built. It complements the [HLD](HLD.md), which covers the
+architecture and principles, by specifying the concrete contracts: package layout, domain models,
+the LangGraph state machine, the provider layer, application services, persistence, the REST and
+MCP surfaces, and the evaluation harness. Where the HLD says what the system does, the LLD says how.
 
-1. LangGraph state and nodes
-2. Domain models
-3. MCP integration interfaces
-4. Application/service interfaces
-5. REST + Revive MCP contracts
-6. Persistence schema
+The design holds one boundary firm:
 
-Then we can define the exact implementation order.
+> LangGraph owns orchestration, application services own business semantics, provider interfaces own
+> vendor and MCP details, and FastAPI and FastMCP are thin transport layers.
 
-# Revive LLD
-
-## 1. Package Architecture
-
-```text
-├── frontend
-├── backend
-    └── app/
-        ├── main.py
-        │
-        ├── api/
-        │   ├── routes/
-        │   │   ├── investigations.py
-        │   │   ├── approvals.py
-        │   │   └── health.py
-        │   └── schemas/
-        │
-        ├── mcp/
-        │   ├── server.py
-        │   └── tools/
-        │       ├── investigation.py
-        │       ├── recovery.py
-        │       └── verification.py
-        │
-        ├── agent/
-        │   ├── graph.py
-        │   ├── state.py
-        │   ├── nodes/
-        │   │   ├── resolve_customer.py
-        │   │   ├── collect_evidence.py
-        │   │   ├── normalize_evidence.py
-        │   │   ├── diagnose.py
-        │   │   ├── recoverability.py
-        │   │   ├── intervention.py
-        │   │   ├── policy.py
-        │   │   ├── approval.py
-        │   │   ├── execute.py
-        │   │   └── verify.py
-        │   └── prompts/
-        │
-        ├── domain/
-        │   ├── models/
-        │   │   ├── customer.py
-        │   │   ├── evidence.py
-        │   │   ├── diagnosis.py
-        │   │   ├── recovery.py
-        │   │   └── action.py
-        │   ├── services/
-        │   │   ├── investigation.py
-        │   │   ├── recovery.py
-        │   │   └── verification.py
-        │   └── policies/
-        │       └── action_policy.py
-        │
-        ├── integrations/
-        │   ├── base.py
-        │   ├── stripe/
-        │   │   └── client.py
-        │   ├── hubspot/
-        │   │   └── client.py
-        │   ├── slack/
-        │   │   └── client.py
-        │   └── userlens/
-        │       └── client.py
-        │
-        ├── persistence/
-        │   ├── models.py
-        │   ├── repositories.py
-        │   └── checkpoint.py
-        │
-        ├── evaluation/
-        │   ├── scenarios.py
-        │   ├── assertions.py
-        │   └── runner.py
-        │
-        └── config.py
-```
-
-The important dependency direction is:
-
-```text
-API / MCP
-    ↓
-Application Services
-    ↓
-LangGraph / Domain
-    ↓
-Integration Interfaces
-    ↓
-MCP Clients
-```
-
-The domain layer should not import FastAPI or vendor-specific SDKs.
+That separation is what lets the same workflow run identically for a human on the web and for an AI
+client over MCP, in a deterministic demo mode or against live tools.
 
 ---
 
-# 2. Core Domain Models
+## 2. Package Architecture
 
-## CustomerContext
+```text
+backend/app/
+├── main.py              # ASGI app: FastAPI + FastMCP mounted at /mcp, lifespan, CORS
+├── config.py            # Settings (env), Windows event-loop policy, log filtering
+│
+├── api/
+│   ├── dependencies.py  # get_current_user_id (X-User-Id stub auth)
+│   ├── schemas.py       # request bodies
+│   └── routes/          # health, investigations, approvals, connections, customers
+│
+├── mcp/
+│   └── server.py        # Revive MCP server: curated business tools
+│
+├── agent/
+│   ├── state.py         # ReviveState (TypedDict)
+│   ├── nodes.py         # all workflow nodes
+│   ├── graph.py         # graph construction + compile (singleton, checkpointer)
+│   ├── llm.py           # HuggingFace chat model + structured diagnosis
+│   └── prompts.py       # LLM prompts
+│
+├── domain/
+│   ├── models/          # customer, evidence, diagnosis, recovery, action, connection
+│   ├── services/        # investigation, connection_manager
+│   └── policies/        # action_policy (deterministic approval classification)
+│
+├── integrations/
+│   ├── base.py          # provider Protocols
+│   ├── factory.py       # seed vs live selection
+│   ├── seed/            # deterministic fixtures + provider
+│   ├── mcp/             # McpClient + live providers
+│   └── arga/            # Arga Labs twin orchestrator
+│
+├── persistence/
+│   ├── checkpoint.py    # LangGraph checkpointer (Postgres or memory)
+│   ├── db.py            # SQLAlchemy async engine + Base
+│   ├── models.py        # ConnectionRow, InvestigationRow, AuditEventRow
+│   └── repositories.py  # InvestigationRepository, AuditRepository
+│
+└── evaluation/
+    ├── scenarios.py     # expected outcomes (derived from fixtures)
+    ├── metrics.py       # ScenarioResult, EvalReport, build_report
+    └── runner.py        # run_eval, evaluate_scenario
+```
+
+The dependency direction is one-way:
+
+```text
+API / MCP transports
+        ↓
+Application services
+        ↓
+LangGraph / domain
+        ↓
+Provider interfaces
+        ↓
+Seed fixtures  |  MCP clients (live)
+```
+
+The domain layer imports neither FastAPI nor vendor SDKs. Transports and providers depend inward on
+the domain, never the reverse.
+
+---
+
+## 3. Domain Models
+
+All domain state is Pydantic v2. Every enum value is lowercase snake_case and is emitted verbatim on
+the wire, so the frontend and MCP clients bind to stable strings.
+
+### Customer
 
 ```python
 class CustomerContext(BaseModel):
     id: str
     name: str
-
     annual_revenue: Decimal | None
     currency: str | None
-
     renewal_date: datetime | None
     renewal_status: str | None
-
     owner_id: str | None
     owner_name: str | None
+    external_ids: dict[str, str]   # {"stripe": "cus_...", "hubspot": "..."}
 ```
 
-We deliberately keep this normalized.
+The customer is normalized. Vendor identifiers live in `external_ids`, so the graph never carries a
+Stripe-shaped or HubSpot-shaped object.
 
-The Stripe customer ID, HubSpot company ID, etc. belong in integration-specific metadata.
+### Evidence
 
----
-
-# 3. Evidence
-
-This is one of the most important models.
+Evidence is the first-class object of the system. Every conclusion downstream references it by id.
 
 ```python
 class EvidenceSource(str, Enum):
-    STRIPE = "stripe"
-    HUBSPOT = "hubspot"
-    SLACK = "slack"
-    USERLENS = "userlens"
-
+    STRIPE = "stripe"; HUBSPOT = "hubspot"; SLACK = "slack"; USERLENS = "userlens"
 
 class EvidenceCategory(str, Enum):
-    BILLING = "billing"
-    PRODUCT_BEHAVIOR = "product_behavior"
-    CRM = "crm"
-    COMMUNICATION = "communication"
-
+    BILLING = "billing"; PRODUCT_BEHAVIOR = "product_behavior"
+    CRM = "crm"; COMMUNICATION = "communication"
 
 class Evidence(BaseModel):
     id: str
-
     source: EvidenceSource
     category: EvidenceCategory
-
     title: str
     finding: str
-
     source_reference: str | None
     timestamp: datetime | None
-
     confidence: float
-
-    supports: list[str] = []
-    contradicts: list[str] = []
+    supports: list[str]      # cause categories this evidence supports
+    contradicts: list[str]   # cause categories this evidence argues against
 ```
 
-Example:
+`supports` and `contradicts` carry cause-category tags. They are what make the diagnosis reproducible
+without an LLM (Section 6) and what let the UI draw the link from a cause back to its evidence.
 
-```json
-{
-  "id": "ev_023",
-  "source": "slack",
-  "category": "communication",
-  "title": "Onboarding frustration",
-  "finding": "CSM reported that Acme struggled with onboarding.",
-  "source_reference": "slack:msg:abc123",
-  "confidence": 0.91,
-  "supports": ["PRODUCT_ADOPTION"]
-}
-```
-
----
-
-# 4. Diagnosis Model
+### Diagnosis
 
 ```python
 class CauseCategory(str, Enum):
-    PRODUCT_ADOPTION = "product_adoption"
-    PRICING = "pricing"
-    PAYMENT = "payment"
-    ORGANIZATIONAL_CHANGE = "organizational_change"
-    CUSTOMER_SUPPORT = "customer_support"
-    PRODUCT_FIT = "product_fit"
-    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
-    OTHER = "other"
-```
+    PRODUCT_ADOPTION; PRICING; PAYMENT; ORGANIZATIONAL_CHANGE
+    CUSTOMER_SUPPORT; PRODUCT_FIT; INSUFFICIENT_EVIDENCE; OTHER
 
-```python
 class CauseHypothesis(BaseModel):
     category: CauseCategory
-
     confidence: float
-
     supporting_evidence_ids: list[str]
     contradicting_evidence_ids: list[str]
-
     reasoning: str
-```
 
-Then:
-
-```python
 class Diagnosis(BaseModel):
     primary_cause: CauseHypothesis
     alternatives: list[CauseHypothesis]
-
     confidence: float
 ```
 
----
+Every hypothesis must reference evidence ids. `INSUFFICIENT_EVIDENCE` is a first-class outcome: the
+diagnosis is allowed to decline rather than invent a cause.
 
-# 5. Recoverability Model
+### Recoverability and Intervention
 
 ```python
 class Recoverability(str, Enum):
-    RECOVERABLE = "recoverable"
-    NOT_RECOVERABLE = "not_recoverable"
-    INSUFFICIENT_EVIDENCE = "insufficient_evidence"
-```
+    RECOVERABLE; NOT_RECOVERABLE; INSUFFICIENT_EVIDENCE
 
-```python
 class RecoverabilityDecision(BaseModel):
     decision: Recoverability
-
     confidence: float
-
-    factors: dict[str, float]
-
+    factors: dict[str, float]        # e.g. {"revenue_value": 0.9, "cause_confidence": 0.9}
     reasoning: str
-
     supporting_evidence_ids: list[str]
-```
 
-Example:
-
-```json
-{
-  "decision": "recoverable",
-  "confidence": 0.82,
-  "factors": {
-    "revenue_value": 0.9,
-    "product_fit": 0.8,
-    "relationship": 0.7,
-    "cause_confidence": 0.87
-  }
-}
-```
-
----
-
-# 6. Intervention Model
-
-```python
 class InterventionType(str, Enum):
-    BILLING_INTERVENTION = "billing_intervention"
-    TARGETED_ONBOARDING = "targeted_onboarding"
-    COMMERCIAL_REVIEW = "commercial_review"
-    STAKEHOLDER_REENGAGEMENT = "stakeholder_reengagement"
-    SUPPORT_ESCALATION = "support_escalation"
-    DO_NOT_PURSUE = "do_not_pursue"
-```
+    BILLING_INTERVENTION; TARGETED_ONBOARDING; COMMERCIAL_REVIEW
+    STAKEHOLDER_REENGAGEMENT; SUPPORT_ESCALATION; DO_NOT_PURSUE
 
-```python
 class Intervention(BaseModel):
     type: InterventionType
-
     priority: Literal["low", "medium", "high"]
-
     reason: str
-
     expected_outcome: str
-
     risk: str
-
     supporting_evidence_ids: list[str]
-
     approval_required: bool
 ```
 
----
+### Action, Result, Verification
 
-# 7. Action Model
-
-Every side effect becomes an explicit action.
+Every side effect is an explicit action, separate from its execution result and its verification.
 
 ```python
 class ActionType(str, Enum):
-    CREATE_CRM_TASK = "create_crm_task"
-    SEND_INTERNAL_NOTIFICATION = "send_internal_notification"
-    SEND_CUSTOMER_MESSAGE = "send_customer_message"
-    UPDATE_CRM = "update_crm"
-    FINANCIAL_MUTATION = "financial_mutation"
-```
+    CREATE_CRM_TASK; SEND_INTERNAL_NOTIFICATION; UPDATE_CRM
+    SEND_CUSTOMER_MESSAGE; FINANCIAL_MUTATION
 
-```python
+class ActionStatus(str, Enum):
+    PROPOSED; APPROVED; REJECTED; EXECUTED; FAILED; VERIFIED
+
 class Action(BaseModel):
     id: str
-
     type: ActionType
-
     description: str
-
     parameters: dict
-
     approval_required: bool
+    status: ActionStatus
 
-    status: str
-```
-
-And execution:
-
-```python
 class ActionResult(BaseModel):
     action_id: str
-
     success: bool
-
-    external_reference: str | None
-
+    external_reference: str | None   # vendor handle used later to verify
     message: str | None
-
     executed_at: datetime
-```
 
----
-
-# 8. Verification
-
-```python
 class VerificationResult(BaseModel):
     action_id: str
-
     verified: bool
-
     expected_state: dict
     actual_state: dict
-
     discrepancies: list[str]
-
     verified_at: datetime
 ```
 
-This allows the UI to say:
+### Connection
 
-```text
-HubSpot task
-✓ Created
-✓ Verified
+Per-user provider credentials. The public model never carries the secret.
 
-Slack notification
-✓ Sent
-✓ Verified
+```python
+class ConnectionProvider(str, Enum):
+    STRIPE; HUBSPOT; SLACK
+
+class ConnectionCreate(BaseModel):
+    provider: ConnectionProvider
+    credentials: dict[str, str]   # {"api_key": "..."} or {"token": "...", "base_url": "..."}
+    scopes: list[str]
+
+class Connection(BaseModel):          # public view; no credentials
+    id: str
+    provider: ConnectionProvider
+    status: ConnectionStatus
+    scopes: list[str]
+    created_at: datetime
+    updated_at: datetime
 ```
-
-rather than simply trusting an API response.
 
 ---
 
-# 9. LangGraph State
+## 4. LangGraph State
 
-Now combine these models into the graph state.
+The graph state combines the models above. It is a plain `TypedDict` (nodes run sequentially, so no
+concurrent-write reducers are needed), and it holds domain model instances rather than loose dicts.
 
 ```python
-class ReviveState(TypedDict):
+class ReviveState(TypedDict, total=False):
     investigation_id: str
-
     customer_query: str
+    user_id: str                 # whose connections to use in live mode
+    created_at: str
+
     customer: CustomerContext | None
-
-    financial_state: FinancialState | None
-    crm_state: CRMState | None
-    communication_state: CommunicationState | None
-    behavior_state: BehaviorState | None
-
     evidence: list[Evidence]
+    evidence_sources: dict[str, str]     # source -> "ok" | "empty" | "error: ..."
 
-    hypotheses: list[CauseHypothesis]
     diagnosis: Diagnosis | None
-
     recoverability: RecoverabilityDecision | None
     intervention: Intervention | None
 
     actions: list[Action]
     action_results: list[ActionResult]
-
-    approval_status: ApprovalStatus | None
-
     verification_results: list[VerificationResult]
 
     warnings: list[str]
-
     status: InvestigationStatus
 ```
 
----
-
-# 10. LangGraph Nodes
-
-Each node should have one responsibility.
-
-### `resolve_customer`
-
-Input:
-
-```text
-customer_query
-```
-
-Output:
-
-```text
-customer
-```
-
-Responsibilities:
-
-* Find customer
-* Resolve cross-system identifiers
-* Detect ambiguity
-* Fail safely if customer cannot be resolved
+The LLM never owns the whole state. It contributes only inside the diagnosis node, and even there its
+output is validated against the `Diagnosis` schema before it enters the state.
 
 ---
 
-### `collect_evidence`
+## 5. LangGraph Nodes and Graph
 
-Fan out into:
-
-```text
-Stripe
-HubSpot
-Slack
-Userlens
-```
-
-These should run concurrently.
-
-Each integration returns normalized evidence.
-
----
-
-### `normalize_evidence`
-
-Responsibilities:
-
-```text
-Remove duplicate evidence
-Normalize timestamps
-Normalize source references
-Validate confidence
-Assign evidence IDs
-```
-
----
-
-### `diagnose`
-
-LLM node.
-
-Input:
-
-```text
-CustomerContext
-Evidence[]
-```
-
-Output:
-
-```text
-Diagnosis
-```
-
-Strict structured output.
-
-No direct side effects.
-
----
-
-### `assess_recoverability`
-
-Input:
-
-```text
-Diagnosis
-Evidence
-CustomerContext
-FinancialState
-```
-
-Output:
-
-```text
-RecoverabilityDecision
-```
-
-This combines deterministic scoring and LLM reasoning.
-
----
-
-### `select_intervention`
-
-Input:
-
-```text
-Diagnosis
-Recoverability
-Evidence
-```
-
-Output:
-
-```text
-Intervention
-```
-
----
-
-### `policy_check`
-
-This should be deterministic.
-
-```python
-def requires_approval(action: Action) -> bool:
-    return action.type in {
-        ActionType.SEND_CUSTOMER_MESSAGE,
-        ActionType.FINANCIAL_MUTATION,
-    }
-```
-
-No LLM involvement.
-
----
-
-### `approval`
-
-Use LangGraph `interrupt()`.
-
-```python
-decision = interrupt({
-    "type": "approval_required",
-    "action": action.model_dump(),
-    "reason": action.description
-})
-```
-
----
-
-### `execute`
-
-Execute only approved/safe actions.
-
----
-
-### `verify`
-
-Query the relevant integration again and compare expected vs actual state.
-
----
-
-# 11. Graph Construction
-
-Conceptually:
-
-```python
-builder.add_node("resolve_customer", resolve_customer)
-builder.add_node("collect_evidence", collect_evidence)
-builder.add_node("normalize_evidence", normalize_evidence)
-builder.add_node("diagnose", diagnose)
-builder.add_node("assess_recoverability", assess_recoverability)
-builder.add_node("select_intervention", select_intervention)
-builder.add_node("policy_check", policy_check)
-builder.add_node("approval", approval)
-builder.add_node("execute", execute)
-builder.add_node("verify", verify)
-```
-
-Edges:
+The workflow is a controlled state machine, not a ReAct loop. Each node has a single responsibility
+and returns a partial state update.
 
 ```mermaid
 flowchart TD
-    A["resolve_customer"]
-    B["collect_evidence"]
-    C["normalize_evidence"]
-    D["diagnose"]
-    E["assess_recoverability"]
-    F["select_intervention"]
-    G["policy_check"]
-    H["approval"]
-    I["execute"]
-    J["verify"]
-    K["finalize"]
+    START([Start]) --> A[resolve_customer]
+    A -->|resolved| B[collect_evidence]
+    A -->|not found| Z([End])
+    B --> C[normalize_evidence]
+    C --> D[diagnose]
+    D --> E[assess_recoverability]
+    E --> F[select_intervention]
+    F --> G[plan_actions]
+    G --> H[approval]
+    H --> I[execute_actions]
+    I --> J[verify_actions]
+    J --> K[finalize]
+    K --> Z
+```
 
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    E --> F
-    F --> G
+- **resolve_customer** resolves the free-text query to a `CustomerContext` via the billing provider. If the customer cannot be resolved it sets `status = FAILED` and the graph short-circuits to the end.
+- **collect_evidence** fans out to billing, CRM, communication and behavior providers with `asyncio.gather`, records a per-source status (`ok` / `empty` / `error`), and never fails the run when one source is unavailable.
+- **normalize_evidence** de-duplicates by id, clamps confidence to [0, 1], and orders by timestamp.
+- **diagnose** produces a `Diagnosis`. See Section 6.
+- **assess_recoverability** maps the primary cause to a `RecoverabilityDecision` (product-fit -> not recoverable, insufficient-evidence -> insufficient, otherwise recoverable) with a revenue factor.
+- **select_intervention** maps the cause to an `InterventionType`; a not-recoverable decision forces `DO_NOT_PURSUE`.
+- **plan_actions** turns the intervention into concrete actions, gated by the recoverability decision (Section 8).
+- **approval** interrupts the graph if any approval-required action is still proposed (Section 8).
+- **execute_actions** executes safe and approved actions idempotently (Section 9).
+- **verify_actions** re-reads each executed action from its provider and compares expected vs actual (Section 9).
+- **finalize** sets `status = COMPLETED`.
 
-    G -->|"safe"| I
-    G -->|"approval required"| H
+The graph is compiled once as a process-wide singleton, against the checkpointer chosen by
+configuration (Section 12), so state persists across the interrupt and can resume in another process.
 
-    H -->|"approved"| I
-    H -->|"rejected"| K
+---
 
-    I --> J
-    J --> K
+## 6. Reasoning: Deterministic First, LLM Enriched
+
+Diagnosis is deterministic-first. The `diagnose` node computes a heuristic result from the structured
+evidence, then optionally lets the LLM refine it.
+
+1. **Heuristic.** Tally `supports` weight (by confidence) across evidence. The top cause becomes the primary hypothesis; its `supporting_evidence_ids` and any `contradicts` are attached. If no evidence carries a support tag, the result is `INSUFFICIENT_EVIDENCE`.
+2. **LLM enrichment.** When `REVIVE_USE_LLM` is on and a HuggingFace token is present, the node passes the evidence and the heuristic hint to the model and asks for a `Diagnosis` as strict JSON. The response is extracted and validated with `Diagnosis.model_validate_json`, with one retry.
+3. **Fallback.** Any LLM failure (no token, network, invalid JSON) falls back to the heuristic and records a warning. The workflow always completes.
+
+```python
+structured = llm_diagnose(customer_name, evidence, heuristic_hint)  # Diagnosis | None
+diagnosis = structured or heuristic
+```
+
+Because live evidence carries no support tags (Section 10), live mode relies on the LLM to classify
+from the finding text, while seed mode is fully deterministic. This is what makes the evaluation
+harness reproducible.
+
+---
+
+## 7. Recoverability and Intervention Mapping
+
+Recoverability is deterministic policy over the diagnosis plus a revenue factor:
+
+```text
+PRODUCT_FIT           -> NOT_RECOVERABLE
+INSUFFICIENT_EVIDENCE -> INSUFFICIENT_EVIDENCE
+otherwise             -> RECOVERABLE
+```
+
+Intervention is a static mapping from cause, overridden to `DO_NOT_PURSUE` when not recoverable:
+
+```text
+product_adoption      -> targeted_onboarding
+payment               -> billing_intervention
+pricing               -> commercial_review
+organizational_change -> stakeholder_reengagement
+customer_support      -> support_escalation
+product_fit           -> do_not_pursue
+insufficient_evidence -> stakeholder_reengagement (monitor)
 ```
 
 ---
 
-# 12. MCP Integration Interfaces
+## 8. Action Policy and Human-in-the-Loop
 
-This is where we keep vendor details isolated.
+`plan_actions` chooses actions by the recoverability decision, not just the cause:
+
+```text
+NOT_RECOVERABLE       -> no actions
+INSUFFICIENT_EVIDENCE -> internal Slack flag only (no CRM write, no customer contact)
+RECOVERABLE           -> HubSpot task + Slack notify + customer outreach draft (approval-gated)
+```
+
+Whether an action needs approval is a deterministic policy, never an LLM decision:
+
+```python
+def requires_approval(action: Action) -> bool:
+    return action.type in {ActionType.SEND_CUSTOMER_MESSAGE, ActionType.FINANCIAL_MUTATION}
+```
+
+The `approval` node interrupts the graph for any approval-required action still `PROPOSED`:
+
+```python
+decision = interrupt({"type": "approval_required",
+                      "actions": [a.model_dump(mode="json") for a in pending]})
+```
+
+The interrupt is durable through the checkpointer, so the paused investigation survives a restart and
+can be resumed from a different process. The resume payload is `{"approved": bool, "edits": {...}}`;
+on approval, per-action parameter edits are merged and the action is marked `APPROVED`; on rejection
+it becomes `REJECTED` and is never executed.
+
+```mermaid
+stateDiagram-v2
+    [*] --> CREATED
+    CREATED --> RUNNING
+    RUNNING --> WAITING_FOR_APPROVAL
+    RUNNING --> COMPLETED
+    RUNNING --> FAILED
+    WAITING_FOR_APPROVAL --> COMPLETED : approve / reject (resume)
+    COMPLETED --> [*]
+    FAILED --> [*]
+```
+
+---
+
+## 9. Execution and Verification
+
+`execute_actions` runs an action when it is either safe-internal-and-proposed or approved. Execution
+is idempotent: a result already recorded as successful is skipped, so a retry or a resumed node never
+double-executes.
+
+`verify_actions` closes the ACT -> VERIFY loop. For each executed action it re-reads the target
+(`get_task`, `get_message`, `get_customer_message`) and compares expected vs actual state. Only a
+clean read-back marks the action `VERIFIED`; a mismatch or missing record records discrepancies.
+
+```text
+create HubSpot task -> read task back -> compare title / owner -> VERIFIED
+send Slack message  -> read message back -> compare channel   -> VERIFIED
+```
+
+A tool call returning success is not treated as done until the state is confirmed.
+
+---
+
+## 10. Provider Layer
+
+Every vendor sits behind a `Protocol`. The graph depends only on these interfaces.
 
 ```python
 class BillingProvider(Protocol):
+    async def find_customer(self, query: str) -> dict: ...
+    async def collect_evidence(self, customer_id: str) -> list[Evidence]: ...
 
-    async def find_customer(
-        self,
-        query: str
-    ) -> CustomerReference:
-        ...
-
-    async def get_subscription(
-        self,
-        customer_id: str
-    ) -> SubscriptionState:
-        ...
-
-    async def get_invoices(
-        self,
-        customer_id: str
-    ) -> list[InvoiceState]:
-        ...
-
-    async def get_payment_state(
-        self,
-        customer_id: str
-    ) -> PaymentState:
-        ...
-```
-
-Stripe MCP implements this interface.
-
----
-
-## HubSpot
-
-```python
 class CRMProvider(Protocol):
+    async def find_company(self, query: str) -> dict: ...
+    async def collect_evidence(self, company_id: str) -> list[Evidence]: ...
+    async def create_task(self, company_id, title, body, owner_id) -> ActionResult: ...
+    async def get_task(self, task_id: str) -> dict | None: ...
 
-    async def find_company(
-        self,
-        query: str
-    ) -> CompanyReference:
-        ...
-
-    async def get_account_context(
-        self,
-        company_id: str
-    ) -> CRMState:
-        ...
-
-    async def create_task(
-        self,
-        task: CreateTaskRequest
-    ) -> ActionResult:
-        ...
-
-    async def get_task(
-        self,
-        task_id: str
-    ) -> TaskState:
-        ...
-```
-
----
-
-## Slack
-
-```python
 class CommunicationProvider(Protocol):
+    async def collect_evidence(self, customer_name: str) -> list[Evidence]: ...
+    async def send_internal_message(self, channel, message) -> ActionResult: ...
+    async def get_message(self, reference) -> dict | None: ...
+    async def send_customer_message(self, to, body) -> ActionResult: ...
+    async def get_customer_message(self, reference) -> dict | None: ...
 
-    async def search(
-        self,
-        query: str
-    ) -> list[Message]:
-        ...
-
-    async def send_internal_message(
-        self,
-        channel: str,
-        message: str
-    ) -> ActionResult:
-        ...
-
-    async def get_message(
-        self,
-        reference: str
-    ) -> Message:
-        ...
+class BehaviorProvider(Protocol):
+    async def collect_evidence(self, customer_name: str) -> list[Evidence]: ...
 ```
+
+Two bundles implement these interfaces, selected by `get_provider_bundle(user_id)`:
+
+- **Seed** (`integrations/seed`) returns evidence from five deterministic fixtures and records writes in process-wide stores so the verify step can read them back. This powers the demo and the evaluation harness.
+- **Live** (`integrations/mcp`) builds one MCP client per provider from the user's stored connection (base URL + token). Each provider maps upstream MCP tool results into normalized `Evidence` / `ActionResult`. A missing connection degrades gracefully to empty evidence rather than failing the run. Live evidence carries no `supports` tags, so the LLM classifies from the finding text.
+
+Live credentials are resolved per user from the connections table (Section 12), never from environment
+variables. The `base_url` on a connection lets a provider point at any compatible MCP endpoint, which
+is how Revive investigates against Arga Labs service twins.
+
+### Arga Labs orchestrator
+
+`integrations/arga` wraps the Arga control MCP (`get_twin_catalog`, `create_twin_run`, `get_twin_run`).
+A twin run provisions a seeded, stateful clone of a service (for example Slack) and returns a URL and
+token, which are saved as a connection so the live provider layer investigates against real, sandboxed
+tool behavior. This is used for reliability testing without touching production systems.
 
 ---
 
-# 13. MCP Clients
+## 11. Application Services
 
-The integration implementation wraps the actual MCP client.
-
-```text
-StripeProvider
-      ↓
-MCP Client
-      ↓
-Stripe MCP
-```
-
-For example:
+`InvestigationService` (`domain/services/investigation.py`) is the single entry point behind both
+transports. It owns the graph invocation and shapes the result dict that the API and MCP return.
 
 ```python
-class StripeMCPProvider(BillingProvider):
-
-    def __init__(self, client: Client):
-        self.client = client
-
-    async def get_subscription(self, customer_id):
-        result = await self.client.call_tool(
-            "stripe_api_read",
-            ...
-        )
-
-        return normalize_subscription(result)
+run_investigation(customer_query, user_id) -> dict          # start, return full result
+resume_investigation(inv_id, approved, edits, user_id) -> dict   # resolve an approval
+get_investigation(inv_id) -> dict | None                    # read persisted state
+list_investigations(user_id, limit) -> list[dict]           # summaries (from the DB)
+stream_investigation(customer_query, user_id) -> AsyncIterator   # SSE progress
+stream_resume(inv_id, approved, edits, user_id) -> AsyncIterator  # SSE resume
 ```
 
-The exact vendor tool names remain isolated here.
+The run is synchronous: `run_investigation` invokes the graph and returns the full result, or, if the
+graph pauses at `approval`, a result with `status = "waiting_for_approval"` and a `pending_action`.
+The streaming variants drive `graph.astream(stream_mode="updates")` and map each node update to an SSE
+event.
 
-If Stripe changes its MCP surface, only this layer changes.
+The **audit trail** is derived from state at result time by `_build_audit`, not written by the nodes,
+which keeps the graph free of persistence concerns. It yields an ordered list of events
+(`customer_resolved`, `evidence_source_completed`, `diagnosis_completed`, `recoverability_decided`,
+`intervention_selected`, `approval_required`, `action_executed`, `action_verified`) that the UI renders
+as the investigation timeline.
+
+`ConnectionManager` (`domain/services/connection_manager.py`) stores and retrieves provider credentials,
+encrypting them with Fernet before they reach the database and decrypting them only when building an
+MCP client.
 
 ---
 
-# 14. Application Services
+## 12. Persistence
 
-## InvestigationService
+Two layers of persistence, both on PostgreSQL:
 
-```python
-class InvestigationService:
-
-    async def start(
-        self,
-        request: InvestigationRequest
-    ) -> Investigation:
-        ...
-```
-
-Responsibilities:
-
-```text
-Create investigation
-Create LangGraph run
-Persist initial state
-Start workflow
-Return investigation ID
-```
-
----
-
-## RecoveryService
-
-```python
-class RecoveryService:
-
-    async def execute(
-        self,
-        investigation_id: str
-    ) -> RecoveryResult:
-        ...
-```
-
----
-
-## VerificationService
-
-```python
-class VerificationService:
-
-    async def verify(
-        self,
-        action_id: str
-    ) -> VerificationResult:
-        ...
-```
-
----
-
-# 15. REST API
-
-## Start Investigation
-
-```http
-POST /api/v1/investigations
-```
-
-Request:
-
-```json
-{
-  "customer": "Acme Corp"
-}
-```
-
-Response:
-
-```json
-{
-  "investigation_id": "inv_123",
-  "status": "running"
-}
-```
-
----
-
-## Get Investigation
-
-```http
-GET /api/v1/investigations/inv_123
-```
-
-Response:
-
-```json
-{
-  "id": "inv_123",
-  "status": "completed",
-  "customer": {
-    "name": "Acme Corp"
-  },
-  "revenue_impact": 36000,
-  "diagnosis": {},
-  "recoverability": {},
-  "intervention": {},
-  "actions": [],
-  "verification": []
-}
-```
-
----
-
-## Investigation Events
-
-```http
-GET /api/v1/investigations/inv_123/events
-```
-
-Use SSE.
-
-Example events:
-
-```text
-customer_resolved
-evidence_source_started
-evidence_source_completed
-diagnosis_started
-diagnosis_completed
-approval_required
-action_executed
-action_verified
-investigation_completed
-```
-
----
-
-# 16. Revive MCP Contract
-
-The public MCP should map to application services.
-
-### `revive.investigate_customer`
-
-```json
-{
-  "customer": "Acme Corp"
-}
-```
-
-Returns:
-
-```json
-{
-  "investigation_id": "inv_123",
-  "status": "completed",
-  "revenue_at_risk": 36000,
-  "primary_cause": "PRODUCT_ADOPTION",
-  "confidence": 0.87,
-  "recoverability": "RECOVERABLE",
-  "recommended_intervention": "TARGETED_ONBOARDING",
-  "evidence": [],
-  "actions": []
-}
-```
-
-### `revive.get_investigation`
-
-```json
-{
-  "investigation_id": "inv_123"
-}
-```
-
-### `revive.get_evidence`
-
-```json
-{
-  "investigation_id": "inv_123"
-}
-```
-
-### `revive.get_recovery_recommendation`
-
-```json
-{
-  "investigation_id": "inv_123"
-}
-```
-
-### `revive.execute_recovery`
-
-```json
-{
-  "investigation_id": "inv_123",
-  "action_ids": [
-    "action_123"
-  ]
-}
-```
-
-### `revive.verify_recovery`
-
-```json
-{
-  "investigation_id": "inv_123"
-}
-```
-
----
-
-# 17. Important MCP Design Decision
-
-There is one subtle issue here.
-
-If Claude calls:
-
-```text
-revive.investigate_customer()
-```
-
-and the workflow takes 30 seconds, we don't want an MCP request to become an enormous blocking operation.
-
-So internally:
-
-```text
-MCP call
-   ↓
-create investigation
-   ↓
-run LangGraph
-   ↓
-return structured result
-```
-
-For the hackathon, this is acceptable if our entire investigation is reasonably fast.
-
-For the production architecture, we should support:
-
-```text
-revive.investigate_customer
-        ↓
-investigation_id
-        ↓
-revive.get_investigation
-```
-
-This also makes the workflow naturally resumable.
-
----
-
-# 18. Persistence Schema
-
-I'd use these core tables.
+1. **LangGraph checkpointer** (`persistence/checkpoint.py`). When `REVIVE_DATABASE_URL` is set, an `AsyncPostgresSaver` over a psycopg pool persists the full graph state per `thread_id` (the investigation id); otherwise a `MemorySaver` is used. This is the source of truth for resume: a paused investigation is recovered exactly, across processes and restarts.
+2. **Application tables** (`persistence/models.py`, written via SQLAlchemy async / asyncpg): `investigations` (queryable summary plus the full result JSON), `audit_events` (the ordered trace), and `connections` (encrypted per-user credentials). These make investigations listable and renderable without replaying the graph.
 
 ```mermaid
 erDiagram
-    ORGANIZATION ||--o{ USER : has
-    ORGANIZATION ||--o{ CONNECTION : owns
-
-    ORGANIZATION ||--o{ INVESTIGATION : owns
-
-    INVESTIGATION ||--o{ EVIDENCE : contains
-    INVESTIGATION ||--o{ CAUSE_HYPOTHESIS : contains
-    INVESTIGATION ||--o{ ACTION : contains
-    INVESTIGATION ||--o{ APPROVAL : contains
-    INVESTIGATION ||--o{ VERIFICATION : contains
-    INVESTIGATION ||--o{ AUDIT_EVENT : contains
-
-    ACTION ||--o{ APPROVAL : requires
-    ACTION ||--o{ VERIFICATION : produces
-
-    ORGANIZATION {
-        uuid id PK
-        string name
-        datetime created_at
-    }
-
-    USER {
-        uuid id PK
-        uuid organization_id FK
-        string email
-        string name
-    }
-
-    CONNECTION {
-        uuid id PK
-        uuid organization_id FK
-        string provider
-        json encrypted_credentials
-        datetime created_at
-    }
-
+    INVESTIGATION ||--o{ AUDIT_EVENT : has
+    USER ||--o{ CONNECTION : owns
     INVESTIGATION {
-        uuid id PK
-        uuid organization_id FK
-        string customer_query
-        string customer_id
+        string id PK
+        string user_id
+        string customer_name
         string status
+        float revenue_impact
+        string primary_cause
+        string recoverability
+        string intervention
         json result
-        datetime created_at
-        datetime completed_at
     }
-
-    EVIDENCE {
-        uuid id PK
-        uuid investigation_id FK
-        string source
-        string category
-        string title
-        text finding
-        json metadata
-        float confidence
-        datetime created_at
-    }
-
-    CAUSE_HYPOTHESIS {
-        uuid id PK
-        uuid investigation_id FK
-        string category
-        float confidence
-        json supporting_evidence
-        json contradicting_evidence
-        text reasoning
-    }
-
-    ACTION {
-        uuid id PK
-        uuid investigation_id FK
-        string type
-        string status
-        json parameters
-        string external_reference
-        datetime executed_at
-    }
-
-    APPROVAL {
-        uuid id PK
-        uuid action_id FK
-        string status
-        uuid approved_by
-        datetime decided_at
-    }
-
-    VERIFICATION {
-        uuid id PK
-        uuid action_id FK
-        boolean verified
-        json expected_state
-        json actual_state
-        json discrepancies
-        datetime verified_at
-    }
-
     AUDIT_EVENT {
-        uuid id PK
-        uuid investigation_id FK
+        string id PK
+        string investigation_id FK
+        int seq
         string event_type
         json payload
-        datetime created_at
+    }
+    CONNECTION {
+        string id PK
+        string user_id
+        string provider
+        text credentials_encrypted
+        string status
     }
 ```
 
-For the hackathon, some of the JSON columns can remain flexible rather than creating excessive normalization.
+Repositories (`InvestigationRepository`, `AuditRepository`) keep data access thin; business logic stays
+in the services. Credentials are never returned by any read path; only `ConnectionManager.get_credentials`
+decrypts, and only for internal use when constructing a client.
 
 ---
 
-# 19. Credential Architecture
+## 13. REST API and SSE
 
-Do not store raw MCP credentials in the LangGraph state.
-
-Use:
-
-```text
-connections
-    ↓
-ConnectionManager
-    ↓
-MCP client
-```
-
-LangGraph state only contains:
+REST base is `/api/v1`. Both REST and MCP call the same `InvestigationService`. The full contract with
+request and response shapes lives in [`backend/docs/API.md`](backend/docs/API.md).
 
 ```text
-connection_id
+GET    /health                                   liveness, data source, persistence, LLM state
+POST   /investigations                           start (sync); returns the full investigation
+GET    /investigations                           list summaries
+GET    /investigations/{id}                      full investigation
+GET    /investigations/stream                    start + stream progress (SSE)
+GET    /investigations/{id}/resume-stream        resume + stream (SSE)
+POST   /investigations/{id}/resume               resume (approve / reject)
+GET    /approvals                                pending approvals
+POST   /approvals/{id}/approve | /reject         resolve an approval (id = investigation id)
+GET    /customers                                book of business: lost / at-risk renewals
+GET    /connections                              list connected providers (no secrets)
+POST   /connections                              connect / update (token encrypted, never returned)
+DELETE /connections/{provider}                   disconnect
 ```
 
-Never:
-
-```text
-access_token
-refresh_token
-api_key
-```
-
-This is especially important because LangGraph state/checkpoints may persist for a long time.
+SSE events are emitted as `event: <name>` + `data: <json>`. The stream endpoints both start work and
+stream it; user identity is passed as a query parameter because `EventSource` cannot set headers.
+Authentication is a stub for the hackathon: `X-User-Id` (defaulting to `demo-user`) identifies the user
+whose connections and investigations are used.
 
 ---
 
-# 20. Idempotency
+## 14. Revive MCP Server
 
-Every external write should have an idempotency strategy.
-
-For example:
-
-```text
-investigation_id + action_id
-```
-
-can become the internal idempotency key.
-
-Before creating a HubSpot task:
+`mcp/server.py` exposes a small, business-oriented surface, deliberately hand-picked rather than
+generated from the routes, so external clients interact with capabilities, not internal endpoints.
 
 ```text
-Does action_id already have external_reference?
-    YES → return existing result
-    NO  → execute
+investigate_customer(customer)
+get_investigation_result(investigation_id)
+list_recent_investigations()
+resume_recovery(investigation_id, approved, edits?)
 ```
 
-This protects us from duplicate actions after retries or graph resumption.
+These call the same `InvestigationService`. The server is mounted at `/mcp` on the same ASGI app over
+Streamable HTTP, so a single deployment serves the web client and AI clients alike.
 
 ---
 
-# 21. Error Handling
+## 15. Book of Business
 
-Each integration should return typed failures.
-
-```python
-class IntegrationError(Exception):
-    provider: str
-    operation: str
-    retryable: bool
-```
-
-Examples:
-
-```text
-Stripe timeout
-    → retry
-
-Slack rate limit
-    → retry with backoff
-
-HubSpot authorization failure
-    → fail investigation safely
-
-Customer not found
-    → stop investigation
-
-Ambiguous customer
-    → ask user / stop
-```
-
-Do not let the LLM decide whether an infrastructure error is retryable.
+`GET /customers` returns the prioritized list of lost or at-risk renewals worth investigating. In seed
+mode it lists the fixtures; in live mode it reads the user's Stripe subscriptions directly (statuses
+`canceled`, `past_due`, `incomplete`, `unpaid`), computes ARR from the subscription price, and marks
+each as `lost` or `payment_failed`. Each row is joined with the latest investigation for that customer
+(from the `investigations` table) so the UI can show a prior verdict instead of re-running.
 
 ---
 
-# 22. Reliability Boundaries
+## 16. Evaluation Harness
 
-The workflow should distinguish:
-
-```text
-Agent failure
-Integration failure
-Policy failure
-Action failure
-Verification failure
-```
-
-Example:
-
-```text
-Stripe unavailable
-    ↓
-Financial evidence unavailable
-    ↓
-Cannot confidently determine revenue impact
-    ↓
-Recoverability = INSUFFICIENT_EVIDENCE
-```
-
-Do not allow the model to fill the missing Stripe data from assumptions.
-
----
-
-# 23. Prompt Architecture
-
-Keep prompts separated by task.
-
-```text
-prompts/
-├── diagnosis.txt
-├── recoverability.txt
-├── intervention.txt
-└── final_report.txt
-```
-
-Each prompt should define:
-
-```text
-Role
-Input schema
-Reasoning constraints
-Output schema
-Evidence requirements
-Forbidden behavior
-```
-
-For example:
-
-```text
-You are the diagnosis component of Revive.
-
-Determine the most likely reason for non-renewal.
-
-Rules:
-1. Use only supplied evidence.
-2. Every conclusion must reference evidence IDs.
-3. Consider contradictory evidence.
-4. Do not invent facts.
-5. Return structured output.
-6. If evidence is insufficient, return INSUFFICIENT_EVIDENCE.
-```
-
----
-
-# 24. LLM Structured Output
-
-Do not parse free-form text.
-
-Use Pydantic schemas:
-
-```python
-structured_llm = llm.with_structured_output(Diagnosis)
-```
-
-Then:
-
-```text
-LLM
- ↓
-Diagnosis schema
- ↓
-Pydantic validation
- ↓
-LangGraph state
-```
-
-This significantly reduces fragile parsing.
-
----
-
-# 25. Evaluation Harness
-
-Each scenario should define:
+Evaluation is part of the product, not an afterthought. Five scenarios have known expected outcomes
+derived from the same fixtures the demo uses, so scenarios and demo data cannot drift.
 
 ```python
 class EvaluationScenario(BaseModel):
     name: str
-
     customer: str
-
     expected_cause: CauseCategory
     expected_recoverability: Recoverability
     expected_intervention: InterventionType
-
     expected_revenue_impact: Decimal
 ```
 
-Runner:
+The runner executes the real workflow end to end (including the approval interrupt, which it approves
+so the full act -> verify loop is measured) and scores eight metrics: cause accuracy, recoverability
+accuracy, intervention accuracy, revenue accuracy, evidence attribution, verification success rate,
+approval compliance, and false-action rate. In deterministic mode all eight are 100%.
 
 ```text
-Scenario
-   ↓
-Revive
-   ↓
-InvestigationResult
-   ↓
-Assertions
-   ↓
-Metrics
+Scenario -> run workflow -> assertions -> ScenarioResult -> EvalReport (eval_report.json)
 ```
 
-This lets us run the same graph against:
-
-```text
-Acme
-Beta
-Gamma
-Delta
-Epsilon
-```
-
-without changing agent code.
+LangSmith traces every run when `LANGCHAIN_TRACING_V2` is enabled.
 
 ---
 
-# 26. Recommended Build Order
+## 17. Configuration and Runtime
 
-Now that HLD and LLD are defined, **do not start with the UI**.
+Settings are `REVIVE_`-prefixed and loaded from the environment; third-party tokens (`HF_TOKEN`,
+`LANGCHAIN_*`, `ARGA_API_KEY`) are read directly. `config.py` also handles two runtime concerns:
 
-Build in this order:
+- On Windows it selects the `SelectorEventLoop`, which psycopg's async driver requires.
+- It silences the checkpointer serde's per-type deprecation notice for Revive's own models.
 
-```mermaid
-flowchart LR
-    A["Project Skeleton"]
-    B["MCP Connections"]
-    C["Demo Data"]
-    D["Domain Models"]
-    E["Integration Layer"]
-    F["LangGraph"]
-    G["Persistence"]
-    H["REST API"]
-    I["Revive MCP"]
-    J["Evaluation"]
-    K["UI"]
-    L["Reliability / Demo"]
-
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-    E --> F
-    F --> G
-    G --> H
-    H --> I
-    I --> J
-    J --> K
-    K --> L
-```
-
-### Phase 1
-
-Create the Python project and connect:
-
-```text
-Stripe MCP
-HubSpot MCP
-Slack MCP
-```
-
-Verify authentication and actual calls.
-
-### Phase 2
-
-Create the demo customer data.
-
-Start with **Acme only**.
-
-### Phase 3
-
-Implement the domain models and provider interfaces.
-
-### Phase 4
-
-Implement the vertical slice:
-
-```text
-Acme
- ↓
-Stripe
- ↓
-HubSpot
- ↓
-Slack
- ↓
-Diagnosis
- ↓
-Recoverability
- ↓
-Recommendation
-```
-
-### Phase 5
-
-Add:
-
-```text
-HubSpot task
-Slack notification
-Verification
-```
-
-### Phase 6
-
-Add human approval.
-
-### Phase 7
-
-Expose the same workflow through FastAPI and FastMCP.
-
-### Phase 8
-
-Add the other scenarios and evaluation.
-
-### Phase 9
-
-Build the UI around the already-working backend.
+The dev server (`scripts/serve.py`) runs Uvicorn with `loop="none"` under the selected policy and with
+proxy headers enabled, so behind a TLS-terminating proxy (Cloudflare) the app knows it is HTTPS and
+generates correct redirects (for example `/mcp`). Deployment is containerized: `docker-compose.yml`
+brings up PostgreSQL, the backend, and a Cloudflare tunnel that gives the shared backend a public URL.
 
 ---
 
-# 27. The First Vertical Slice
+## 18. Reliability Boundaries and Error Handling
 
-Before implementing the complete graph, our first successful run should be:
+The system distinguishes failure classes and never lets the LLM decide whether an infrastructure error
+is retryable:
 
-```mermaid
-flowchart TD
-    A["Acme Corp"] --> B["Resolve Customer"]
-    B --> C["Stripe"]
-    B --> D["HubSpot"]
-    B --> E["Slack"]
-
-    C --> F["Evidence"]
-    D --> F
-    E --> F
-
-    F --> G["Diagnosis"]
-    G --> H["Recoverability"]
-    H --> I["Targeted Onboarding"]
-    I --> J["Create HubSpot Task"]
-    J --> K["Verify Task"]
-    K --> L["Investigation Complete"]
+```text
+Customer not found        -> stop the investigation safely (status FAILED)
+A source is unavailable   -> that source's evidence is empty, run continues, warning recorded
+No corroborating evidence -> INSUFFICIENT_EVIDENCE (no fabricated cause)
+Action execution fails    -> recorded as a failed ActionResult, run continues
+Verification fails        -> action not marked verified, discrepancies recorded
 ```
 
-If this works end to end, **we have the product**.
+Missing data reduces confidence rather than being filled by assumption. An unavailable Stripe, for
+example, yields no financial evidence rather than a guessed revenue figure.
 
-Everything else is expansion, reliability, evaluation, and presentation.
+---
 
-The key LLD decision I would lock is therefore:
+## 19. Idempotency
 
-> **LangGraph owns orchestration, domain services own business semantics, integration providers own MCP/vendor details, and FastAPI/FastMCP are thin transport layers.**
+Every external write is idempotent. Execution skips any action whose id already has a successful
+result, so retries after a transient error and re-entry after an approval resume never produce a
+duplicate task, notification, or message. This is what makes the interrupt-and-resume flow safe.
 
-That separation gives us enough structure to build quickly without turning a six-hour hackathon project into an over-engineered distributed system.
+---
+
+## 20. Build Order
+
+The system was built as a vertical slice first, then widened:
+
+```text
+skeleton + config
+  -> domain models
+  -> provider Protocols + seed fixtures
+  -> LangGraph workflow (resolve -> ... -> intervention)
+  -> action layer (execute -> verify)
+  -> human approval (interrupt / resume)
+  -> persistence (checkpointer + tables + repositories)
+  -> REST API + SSE + FastMCP server
+  -> evaluation harness
+  -> live MCP providers + Arga twins
+  -> frontend
+```
+
+The first successful run (resolve Acme -> Stripe / HubSpot / Slack -> diagnose -> recoverability ->
+recommend -> create task -> verify) was the product in miniature. Everything after is expansion,
+reliability, evaluation, and presentation.
