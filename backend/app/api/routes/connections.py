@@ -10,15 +10,24 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.dependencies import get_current_user_id
+from app.config import settings
 from app.domain.models.connection import Connection, ConnectionCreate, ConnectionProvider
 from app.domain.services.connection_manager import ConnectionError, ConnectionManager
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 _manager = ConnectionManager()
 
+NO_DB = "Connections need the backend database. Set REVIVE_DATABASE_URL (Postgres) and restart the backend."
+
+
+def _require_db() -> None:
+    if not settings.database_url:
+        raise HTTPException(status_code=503, detail=NO_DB)
+
 
 @router.get("", response_model=list[Connection])
 async def list_connections(user_id: str = Depends(get_current_user_id)) -> list[Connection]:
+    _require_db()
     return await _manager.list(user_id)
 
 
@@ -26,6 +35,7 @@ async def list_connections(user_id: str = Depends(get_current_user_id)) -> list[
 async def create_connection(
     payload: ConnectionCreate, user_id: str = Depends(get_current_user_id)
 ) -> Connection:
+    _require_db()
     try:
         return await _manager.upsert(user_id, payload)
     except ConnectionError as exc:
@@ -36,5 +46,6 @@ async def create_connection(
 async def delete_connection(
     provider: ConnectionProvider, user_id: str = Depends(get_current_user_id)
 ) -> None:
+    _require_db()
     if not await _manager.delete(user_id, provider):
         raise HTTPException(status_code=404, detail="connection not found")
