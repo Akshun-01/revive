@@ -1,0 +1,581 @@
+<title>Revive API Contract</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --ground: #f5f7f5;
+    --surface: #ffffff;
+    --surface-2: #eef2ef;
+    --code-bg: #f0f3f0;
+    --ink: #16211c;
+    --ink-soft: #4a5852;
+    --ink-faint: #7c8a83;
+    --border: #dde4df;
+    --border-strong: #c8d2cc;
+    --accent: #1c8a5c;
+    --accent-soft: #e2f1e9;
+    --get: #2f6f8f;
+    --get-soft: #e2eef4;
+    --amber: #a86a12;
+    --amber-soft: #f6ecd8;
+    --shadow: 0 1px 2px rgba(20,40,30,.05), 0 8px 24px rgba(20,40,30,.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0d1411;
+      --surface: #131c17;
+      --surface-2: #17221c;
+      --code-bg: #0f1713;
+      --ink: #dde7e1;
+      --ink-soft: #9aa9a2;
+      --ink-faint: #6d7c75;
+      --border: #26312b;
+      --border-strong: #33423a;
+      --accent: #45b985;
+      --accent-soft: #16281f;
+      --get: #6fb5d4;
+      --get-soft: #142530;
+      --amber: #d59a3f;
+      --amber-soft: #2a2113;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0d1411;
+    --surface: #131c17;
+    --surface-2: #17221c;
+    --code-bg: #0f1713;
+    --ink: #dde7e1;
+    --ink-soft: #9aa9a2;
+    --ink-faint: #6d7c75;
+    --border: #26312b;
+    --border-strong: #33423a;
+    --accent: #45b985;
+    --accent-soft: #16281f;
+    --get: #6fb5d4;
+    --get-soft: #142530;
+    --amber: #d59a3f;
+    --amber-soft: #2a2113;
+    --shadow: none;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+  }
+  .wrap {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+    padding-block: 40px 72px;
+  }
+  code, pre, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  /* Header */
+  header { margin-bottom: 40px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; font-weight: 500;
+    letter-spacing: .16em; text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 12px;
+  }
+  h1 {
+    font-size: clamp(30px, 6vw, 44px);
+    font-weight: 700; line-height: 1.08;
+    letter-spacing: -.02em; text-wrap: balance;
+    margin: 0 0 10px;
+  }
+  .lede { font-size: 17px; color: var(--ink-soft); margin: 0 0 24px; max-width: 62ch; }
+
+  .meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .meta div { background: var(--surface); padding: 12px 16px; }
+  .meta dt {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 3px;
+  }
+  .meta dd { margin: 0; font-family: "IBM Plex Mono", monospace; font-size: 13.5px; word-break: break-all; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 20px; font-size: 13.5px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.live { background: var(--accent); }
+  .dot.plan { background: var(--amber); }
+
+  .warn {
+    margin-top: 20px;
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--amber-soft);
+    border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+    border-radius: 10px; padding: 12px 16px;
+    font-size: 14px;
+  }
+  .warn b { color: var(--amber); }
+
+  /* Sections */
+  section { margin-top: 48px; }
+  h2 {
+    font-size: 13px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-faint);
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    margin: 0 0 24px;
+  }
+
+  /* Summary table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  thead th {
+    text-align: left; font-weight: 600; font-size: 11px;
+    letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint);
+    background: var(--surface-2); padding: 11px 16px; white-space: nowrap;
+  }
+  tbody td { padding: 11px 16px; border-top: 1px solid var(--border); background: var(--surface); vertical-align: middle; }
+  tbody tr td:first-child { white-space: nowrap; }
+  .path { font-family: "IBM Plex Mono", monospace; font-size: 13px; }
+
+  /* Method badge */
+  .m {
+    font-family: "IBM Plex Mono", monospace; font-weight: 600; font-size: 11px;
+    letter-spacing: .04em; padding: 3px 8px; border-radius: 6px; display: inline-block;
+  }
+  .m.get { color: var(--get); background: var(--get-soft); }
+  .m.post { color: var(--accent); background: var(--accent-soft); }
+
+  .st { font-size: 12px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--ink-soft); }
+
+  /* Endpoint blocks */
+  .ep {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    margin-bottom: 20px;
+    box-shadow: var(--shadow);
+  }
+  .ep-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .ep-head .path { font-size: 15px; font-weight: 500; }
+  .ep-desc { color: var(--ink-soft); font-size: 14.5px; margin: 4px 0 16px; }
+  .ep-desc:last-child { margin-bottom: 0; }
+  .sublabel {
+    font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 16px 0 7px; font-weight: 600;
+  }
+  .sublabel:first-child { margin-top: 0; }
+
+  /* Code */
+  .code {
+    position: relative;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  pre {
+    margin: 0; padding: 14px 16px; overflow-x: auto;
+    font-size: 13px; line-height: 1.62; color: var(--ink);
+    tab-size: 2;
+  }
+  .code.accent { border-left: 3px solid var(--accent); }
+  .copy {
+    position: absolute; top: 8px; right: 8px;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    color: var(--ink-faint); background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 9px; cursor: pointer; opacity: 0; transition: opacity .12s, color .12s;
+  }
+  .code:hover .copy, .copy:focus-visible { opacity: 1; }
+  .copy:hover { color: var(--accent); }
+  .copy.ok { color: var(--accent); opacity: 1; }
+
+  .note { font-size: 13.5px; color: var(--ink-soft); margin: 12px 0 0; }
+  .note code, p code, li code, td code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; }
+
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+
+  .callout {
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+    border-radius: 10px; padding: 14px 18px; font-size: 14px; margin-top: 4px;
+  }
+
+  footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 13px; color: var(--ink-faint); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Frontend Integration · v0.1</p>
+    <h1>Revive API Contract</h1>
+    <p class="lede">REST contract for the Revive revenue-recovery agent. Build the Next.js
+      investigation workspace against these shapes - mock the planned endpoints until the
+      backend lands them. Field names and enum values match the backend's Pydantic models exactly.</p>
+
+    <dl class="meta">
+      <div><dt>Base URL (dev)</dt><dd>http://127.0.0.1:8000</dd></div>
+      <div><dt>API prefix</dt><dd>/api/v1</dd></div>
+      <div><dt>MCP endpoint</dt><dd>/mcp</dd></div>
+      <div><dt>Content type</dt><dd>application/json</dd></div>
+    </dl>
+
+    <div class="legend">
+      <span><span class="dot live"></span> <b>Live</b> - implemented now</span>
+      <span><span class="dot plan"></span> <b>Planned</b> - none remaining; all endpoints below are live</span>
+    </div>
+
+    <div class="callout">
+      <b>CORS enabled</b> (all origins, hackathon) and <b>auth is a stub</b>: send an
+      <code>X-User-Id</code> header on every call (defaults to <code>demo-user</code>).
+      Connections, investigations, approvals, SSE streaming and the MCP server are all live.
+      <code>POST /investigations</code> runs synchronously and returns the full result; for a
+      live timeline use the SSE <code>/stream</code> endpoint.
+    </div>
+  </header>
+
+  <section aria-label="Endpoint summary">
+    <h2>Endpoints</h2>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Method</th><th>Path</th><th>Status</th><th>Purpose</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="m get">GET</span></td><td class="path">/api/v1/health</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Liveness + mode</td></tr>
+          <tr><td><span class="m get">GET</span></td><td class="path">/api/v1/connections</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>List connected providers</td></tr>
+          <tr><td><span class="m post">POST</span></td><td class="path">/api/v1/connections</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Connect a provider</td></tr>
+          <tr><td><span class="m post">DELETE</span></td><td class="path">/api/v1/connections/{provider}</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Disconnect a provider</td></tr>
+          <tr><td><span class="m post">POST</span></td><td class="path">/api/v1/investigations</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Start an investigation (sync, full result)</td></tr>
+          <tr><td><span class="m get">GET</span></td><td class="path">/api/v1/investigations</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>List investigation summaries</td></tr>
+          <tr><td><span class="m get">GET</span></td><td class="path">/api/v1/investigations/{id}</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Full investigation result</td></tr>
+          <tr><td><span class="m post">POST</span></td><td class="path">/api/v1/investigations/{id}/resume</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Resume after approval</td></tr>
+          <tr><td><span class="m get">GET</span></td><td class="path">/api/v1/approvals</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>List pending approvals</td></tr>
+          <tr><td><span class="m post">POST</span></td><td class="path">/api/v1/approvals/{id}/approve</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Approve (id = investigation_id)</td></tr>
+          <tr><td><span class="m post">POST</span></td><td class="path">/api/v1/approvals/{id}/reject</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Reject (id = investigation_id)</td></tr>
+          <tr><td><span class="m get">GET</span></td><td class="path">/api/v1/investigations/stream?customer=</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Start + stream progress (SSE)</td></tr>
+          <tr><td><span class="m get">GET</span></td><td class="path">/api/v1/investigations/{id}/resume-stream</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Resume + stream (SSE)</td></tr>
+          <tr><td><span class="m post">POST</span></td><td class="path">/mcp</td><td><span class="st"><span class="dot live"></span>Live</span></td><td>Revive MCP server (AI clients)</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Money values are numbers in USD. Timestamps are ISO-8601 strings.</p>
+  </section>
+
+  <section>
+    <h2>Reference</h2>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m get">GET</span><span class="path">/api/v1/health</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">Liveness plus current data source and LLM provider. Informational - the UI does not branch on it.</p>
+      <div class="code"><button class="copy">copy</button><pre>{ "status": "ok", "data_source": "seed", "llm_provider": "huggingface" }</pre></div>
+      <p class="note"><code>data_source</code>: <code>seed</code> (deterministic fixtures) or <code>live</code> (real Stripe / HubSpot / Slack).</p>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m get">GET</span><span class="path">/api/v1/connections</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">The user connects their own Stripe / HubSpot / Slack by pasting a token. Tokens are
+        encrypted at rest and never returned to the browser. Send <code>X-User-Id</code> on every call.
+        Build the Integrations / Connect screen against these three endpoints.</p>
+      <p class="sublabel">GET - list (no secrets)</p>
+      <div class="code accent"><button class="copy">copy</button><pre>[
+  {
+    "id": "1169c77ed5cc4558b61579294a9cd577",
+    "provider": "hubspot",
+    "status": "connected",
+    "scopes": ["crm.read"],
+    "created_at": "2026-09-13T18:15:39Z",
+    "updated_at": "2026-09-13T18:15:39Z"
+  }
+]</pre></div>
+      <p class="sublabel">POST - connect (provider: stripe | hubspot | slack)</p>
+      <div class="code"><button class="copy">copy</button><pre>{
+  "provider": "hubspot",
+  "credentials": { "token": "pat-na1-..." },
+  "scopes": ["crm.read"]
+}</pre></div>
+      <p class="note">Response <code>201</code> is the public Connection above - the token is <b>not</b> echoed.
+        Idempotent per provider (re-posting updates in place). <code>DELETE /api/v1/connections/{provider}</code>
+        returns <code>204</code>, or <code>404</code> if not connected.</p>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m post">POST</span><span class="path">/api/v1/investigations</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">Start an investigation. Runs <b>synchronously</b> and returns the full investigation object
+        (same shape as GET below). If it pauses for sign-off, the response has
+        <code>status: "waiting_for_approval"</code> and a <code>pending_action</code>.</p>
+      <p class="sublabel">Request</p>
+      <div class="code"><button class="copy">copy</button><pre>{ "customer": "Northwind Robotics" }</pre></div>
+      <p class="sublabel">Response · 200 = the full investigation object (see GET below)</p>
+      <p class="note">Seed-mode demo customers: <code>Northwind Robotics</code>, <code>Cascade Freight</code>, <code>Meridian Analytics</code>, <code>Tidewater Systems</code>, <code>Solstice Media</code>.
+        <code>GET /api/v1/investigations</code> lists summaries.</p>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m get">GET</span><span class="path">/api/v1/investigations/{id}</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">The full investigation object - the primary payload the workspace renders. Fields fill in
+        as the workflow progresses; expect nulls until a stage completes.</p>
+      <div class="code accent"><button class="copy">copy</button><pre>{
+  "id": "inv_123",
+  "status": "completed",
+  "customer": {
+    "id": "northwind",
+    "name": "Northwind Robotics",
+    "annual_revenue": 36000,
+    "currency": "USD",
+    "renewal_date": "2026-09-10T00:00:00",
+    "renewal_status": "lost",
+    "owner_id": "u_sarah",
+    "owner_name": "Sarah Chen",
+    "external_ids": { "stripe": "cus_northwind", "hubspot": "hs_northwind" }
+  },
+  "revenue_impact": 36000,
+  "evidence": [
+    {
+      "id": "nw_ul1",
+      "source": "userlens",
+      "category": "product_behavior",
+      "title": "Usage decline 67%",
+      "finding": "Weekly activity fell 67% over the final 45 days. Feature X never adopted.",
+      "source_reference": "userlens:nw_ul1",
+      "timestamp": "2026-09-10T12:00:00",
+      "confidence": 0.92,
+      "supports": ["product_adoption"],
+      "contradicts": []
+    }
+  ],
+  "diagnosis": {
+    "primary_cause": {
+      "category": "product_adoption",
+      "confidence": 0.9,
+      "supporting_evidence_ids": ["nw_ul1", "nw_sl1"],
+      "contradicting_evidence_ids": [],
+      "reasoning": "Usage collapsed and the CSM reported onboarding friction; no payment failure."
+    },
+    "alternatives": [],
+    "confidence": 0.9
+  },
+  "recoverability": {
+    "decision": "recoverable",
+    "confidence": 0.82,
+    "factors": { "revenue_value": 0.9, "cause_confidence": 0.9, "relationship": 0.7 },
+    "reasoning": "High ARR, controllable cause, engaged owner.",
+    "supporting_evidence_ids": ["nw_ul1", "nw_sl1"]
+  },
+  "intervention": {
+    "type": "targeted_onboarding",
+    "priority": "high",
+    "reason": "Close the adoption gap that drove non-renewal.",
+    "expected_outcome": "Re-engage the account and win back the renewal.",
+    "risk": "Low - internal action.",
+    "supporting_evidence_ids": ["nw_ul1", "nw_sl1"],
+    "approval_required": false
+  },
+  "actions": [
+    {
+      "id": "action_1",
+      "type": "create_crm_task",
+      "description": "Create HubSpot recovery task for Sarah Chen.",
+      "parameters": { "company_id": "hs_northwind", "title": "Recover Northwind", "owner_id": "u_sarah" },
+      "approval_required": false,
+      "status": "verified",
+      "result": {
+        "action_id": "action_1",
+        "success": true,
+        "external_reference": "task_32c27fc8",
+        "message": "HubSpot task created: Recover Northwind",
+        "executed_at": "2026-09-13T16:44:00Z"
+      }
+    }
+  ],
+  "verification": [
+    {
+      "action_id": "action_1",
+      "verified": true,
+      "expected_state": { "title": "Recover Northwind", "owner_id": "u_sarah" },
+      "actual_state": { "title": "Recover Northwind", "owner_id": "u_sarah" },
+      "discrepancies": [],
+      "verified_at": "2026-09-13T16:44:01Z"
+    }
+  ],
+  "pending_action": null,
+  "audit": [
+    { "seq": 0, "event_type": "customer_resolved", "payload": { "id": "northwind", "name": "Northwind Robotics" }, "at": "2026-09-13T16:42:00Z" },
+    { "seq": 5, "event_type": "diagnosis_completed", "payload": { "primary_cause": "product_adoption", "confidence": 0.9 }, "at": "2026-09-13T16:43:00Z" },
+    { "seq": 9, "event_type": "action_verified", "payload": { "action_id": "action_1", "verified": true }, "at": "2026-09-13T16:44:01Z" }
+  ],
+  "warnings": [],
+  "created_at": "2026-09-13T16:42:00Z",
+  "completed_at": "2026-09-13T16:44:02Z"
+}</pre></div>
+      <p class="note"><code>audit[]</code> is the ordered, persisted investigation trace - render it as the timeline.
+        Event types: customer_resolved, evidence_source_completed, diagnosis_completed, recoverability_decided,
+        intervention_selected, approval_required, action_executed, action_verified.</p>
+      <p class="note">When <code>status == "waiting_for_approval"</code>, <code>pending_action</code> holds the
+        Action awaiting a human decision (<code>status: "proposed"</code>), mirrored in <code>GET /approvals</code>.</p>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m get">GET</span><span class="path">/api/v1/investigations/stream</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">Server-Sent Events (<code>text/event-stream</code>) for the live timeline. This endpoint
+        <b>starts</b> an investigation and streams progress: <code>?customer=&lt;name&gt;&amp;user_id=&lt;id&gt;</code>
+        (query params - EventSource cannot set headers). Ends with <code>investigation_completed</code>, or
+        <code>approval_required</code> if it pauses. Resume + stream the rest with
+        <code>GET /api/v1/investigations/{id}/resume-stream?approved=true</code>.</p>
+      <div class="code"><button class="copy">copy</button><pre>investigation_started    data: { "id": "inv_123", "customer_query": "Northwind Robotics" }
+customer_resolved        data: { "id": "northwind", "name": "Northwind Robotics" }
+evidence_collected       data: { "sources": { "stripe": "ok", ... }, "count": 4 }
+diagnosis_completed      data: { "primary_cause": "product_adoption", "confidence": 0.9 }
+recoverability_decided   data: { "decision": "recoverable", "confidence": 0.95 }
+intervention_selected    data: { "type": "targeted_onboarding" }
+actions_planned          data: { "count": 3 }
+approval_required        data: { "investigation_id": "inv_123", "pending_action": { ... } }
+action_executed          data: { "action_id": "act_..", "success": true, "ref": "task_.." }
+action_verified          data: { "action_id": "act_..", "verified": true }
+investigation_completed  data: { "status": "completed", "investigation_id": "inv_123" }</pre></div>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m get">GET</span><span class="path">/api/v1/approvals</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">Pending human-in-the-loop approvals. External / financial actions
+        (<code>send_customer_message</code>, <code>financial_mutation</code>) pause the workflow until resolved.</p>
+      <div class="code accent"><button class="copy">copy</button><pre>[
+  {
+    "id": "apr_1",
+    "investigation_id": "inv_123",
+    "action": {
+      "id": "action_2",
+      "type": "send_customer_message",
+      "description": "Send recovery email to the buyer at Northwind Robotics.",
+      "parameters": { "to": "j.rivera@northwind.io", "body": "Hi John, ..." },
+      "approval_required": true,
+      "status": "proposed"
+    },
+    "status": "pending",
+    "created_at": "2026-09-13T16:43:30Z"
+  }
+]</pre></div>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m post">POST</span><span class="path">/api/v1/approvals/{id}/approve</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">Approve - optionally editing parameters first. Resumes the workflow, which executes then verifies.</p>
+      <p class="sublabel">Request (body optional)</p>
+      <div class="code"><button class="copy">copy</button><pre>{ "edited_parameters": { "body": "Hi John, revised copy..." } }</pre></div>
+      <p class="sublabel">Response</p>
+      <div class="code accent"><button class="copy">copy</button><pre>{ "id": "apr_1", "status": "approved" }</pre></div>
+    </div>
+
+    <div class="ep">
+      <div class="ep-head"><span class="m post">POST</span><span class="path">/api/v1/approvals/{id}/reject</span><span class="st"><span class="dot live"></span>Live</span></div>
+      <p class="ep-desc">Reject the action. The investigation ends with status <code>rejected</code>.</p>
+      <p class="sublabel">Request</p>
+      <div class="code"><button class="copy">copy</button><pre>{ "reason": "Not ready for outreach." }</pre></div>
+      <p class="sublabel">Response</p>
+      <div class="code accent"><button class="copy">copy</button><pre>{ "id": "apr_1", "status": "rejected" }</pre></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Enum values</h2>
+    <p class="ep-desc" style="margin-top:-8px">Use verbatim - the backend emits lowercase snake_case.</p>
+    <div class="code"><button class="copy">copy</button><pre>InvestigationStatus : created | running | waiting_for_approval | completed | rejected | failed
+EvidenceSource      : stripe | hubspot | slack | userlens
+EvidenceCategory    : billing | product_behavior | crm | communication
+CauseCategory       : product_adoption | pricing | payment | organizational_change |
+                      customer_support | product_fit | insufficient_evidence | other
+Recoverability      : recoverable | not_recoverable | insufficient_evidence
+InterventionType    : billing_intervention | targeted_onboarding | commercial_review |
+                      stakeholder_reengagement | support_escalation | do_not_pursue
+ActionType          : create_crm_task | send_internal_notification | update_crm |
+                      send_customer_message | financial_mutation
+ActionStatus        : proposed | approved | rejected | executed | failed | verified
+ApprovalStatus      : pending | approved | rejected</pre></div>
+  </section>
+
+  <section>
+    <h2>Workspace section → data</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>UI section</th><th>Source field</th></tr></thead>
+        <tbody>
+          <tr><td>Header (name / ARR / status)</td><td class="path">customer · revenue_impact · customer.renewal_status</td></tr>
+          <tr><td>Investigation timeline</td><td class="path">audit[] (persisted trace) or SSE events</td></tr>
+          <tr><td>Financial Impact</td><td class="path">revenue_impact · evidence[source=stripe]</td></tr>
+          <tr><td>Evidence</td><td class="path">evidence[] grouped by source</td></tr>
+          <tr><td>Root Cause</td><td class="path">diagnosis.primary_cause · diagnosis.alternatives</td></tr>
+          <tr><td>Recoverability</td><td class="path">recoverability</td></tr>
+          <tr><td>Recommended Action</td><td class="path">intervention</td></tr>
+          <tr><td>Actions Taken</td><td class="path">actions[] · actions[].result</td></tr>
+          <tr><td>Verification</td><td class="path">verification[]</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout" style="margin-top:20px">
+      <b>The evidence chain is the hero.</b> Every <code>diagnosis</code> and <code>recoverability</code>
+      references <code>*_evidence_ids</code> that map back to an <code>evidence[].id</code>. Render those as
+      live links between the cause and its supporting evidence - that traceability is the product's core value.
+    </div>
+  </section>
+
+  <section>
+    <h2>Revive MCP server (/mcp)</h2>
+    <p class="ep-desc">For AI clients (Claude / ChatGPT / Cursor). Streamable-HTTP MCP mounted at
+      <code>/mcp</code>. Curated business tools only - internal endpoints are not exposed. Same
+      application services as REST, so behavior is identical across transports.</p>
+    <div class="code"><button class="copy">copy</button><pre>investigate_customer(customer)                       -> full investigation
+get_investigation_result(investigation_id)           -> full investigation
+list_recent_investigations()                         -> summaries
+resume_recovery(investigation_id, approved, edits?)  -> resume a paused investigation</pre></div>
+  </section>
+
+  <section>
+    <h2>Integration notes</h2>
+    <ul>
+      <li><b>CORS</b> - enabled for all origins (hackathon). Browser calls work.</li>
+      <li><b>Auth</b> - stub: send <code>X-User-Id</code> on every call (defaults to <code>demo-user</code>).</li>
+      <li><b>Typed client</b> - generate types from <code>http://127.0.0.1:8000/openapi.json</code>; interactive docs at <code>/docs</code> and <code>/redoc</code>.</li>
+      <li><b>Seed mode is deterministic</b> - same input, same output. Build and demo the whole UI with no live credentials.</li>
+      <li><b>Sync model</b> - <code>POST /investigations</code> returns the full result; if it pauses, poll <code>GET /{id}</code> or use <code>audit[]</code> for the timeline (SSE not built).</li>
+    </ul>
+    <p class="sublabel" style="margin-top:22px">Run the backend</p>
+    <div class="code"><button class="copy">copy</button><pre>cd backend
+uv sync --extra dev --extra db
+docker compose up -d                    # Postgres on 5433
+uv run uvicorn app.main:app --reload    # http://127.0.0.1:8000</pre></div>
+  </section>
+
+  <footer>Revive · Revenue Recovery Agent - API contract v0.3 · health, connections, investigations, approvals and the MCP server are live; only the SSE stream is pending.</footer>
+</div>
+
+<script>
+  document.querySelectorAll(".copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var pre = btn.parentElement.querySelector("pre");
+      if (!pre) return;
+      var done = function () {
+        btn.textContent = "copied"; btn.classList.add("ok");
+        setTimeout(function () { btn.textContent = "copy"; btn.classList.remove("ok"); }, 1400);
+      };
+      try {
+        navigator.clipboard.writeText(pre.innerText).then(done, function () {});
+      } catch (e) { /* clipboard blocked - no-op */ }
+    });
+  });
+</script>
