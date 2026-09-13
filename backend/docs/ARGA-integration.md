@@ -50,16 +50,29 @@ so this also lands originality.
    REVIVE_DATA_SOURCE=live uv run python -m scripts.run_live "Northwind Robotics" --user demo-user
    ```
 
-## Tuning (the one manual step)
+## Verified: Slack twin (free plan)
 
-`app/integrations/mcp/provider.py` uses best-effort tool names + arg names + result field
-paths. Each twin mirrors its real service's schema, which differs per provider and per twin
-transport (some twins expose MCP, some a REST/`frontend` API). After a twin run:
+Confirmed end-to-end against a real Arga Slack twin:
 
-1. If the twin exposes MCP: `McpClient(twin_url, token).list_tool_names()` to see its tools,
-   then set the provider's `SEARCH_TOOL` / `CREATE_TASK_TOOL` / arg keys / result fields to match.
-2. If a twin exposes REST only (not MCP), add a small REST adapter for that provider instead of
-   `McpClient` (same Protocol methods).
+- Free plan limits: **1 twin per run**, **10-minute** session TTL. So provision one twin per run
+  (`arga_twin create "<scenario>" slack`) and move quickly.
+- `get_twin_run <run_id>` returns per-twin `mcp_url` and `env_vars` (e.g. `SLACK_USER_TOKEN`).
+  Save the connection as `{ "base_url": "<mcp_url>", "token": "<SLACK_USER_TOKEN>" }`.
+- The Slack twin MCP exposes real tools: `slack_search_messages`, `slack_read_channel`,
+  `slack_list_channels`, `slack_send_message`, `slack_read_thread`, ... `SlackLiveProvider` is
+  tuned to these.
+- **Scope gotcha:** the placeholder twin user token lacks `search:read`, so `slack_search_messages`
+  returns `missing_scope`. `SlackLiveProvider.collect_evidence` therefore falls back to
+  `slack_list_channels` + `slack_read_channel` and filters messages mentioning the customer -
+  which works with the default token and returns the seeded #renewals messages. For full search,
+  mint a scoped user token via the twin's OAuth flow.
+
+## Tuning other twins
+
+Stripe / HubSpot twins differ in schema and transport (`backend` twins may expose a REST API
+rather than MCP). For each: `McpClient(twin_url, token).list_tool_names()` (if MCP), then set that
+provider's `SEARCH_TOOL` / `CREATE_TASK_TOOL` / arg keys / result fields. If a twin is REST-only,
+add a small REST adapter implementing the same Protocol methods instead of `McpClient`.
 
 Live evidence carries no `supports` cause tags, so the LLM (not the heuristic) classifies the
 cause - keep `REVIVE_USE_LLM=true` and a valid `HF_TOKEN`.

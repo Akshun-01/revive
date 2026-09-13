@@ -120,12 +120,11 @@ class HubSpotLiveProvider:
 
 
 class SlackLiveProvider:
-    """CommunicationProvider over the Slack MCP server."""
+    """CommunicationProvider over the Slack MCP server (verified against an Arga Slack twin)."""
 
-    SEARCH_TOOL = "search_messages"
+    SEARCH_TOOL = "slack_search_messages"
     SEARCH_ARG = "query"
-    SEND_TOOL = "send_message"
-    GET_TOOL = "get_message"
+    SEND_TOOL = "slack_send_message"
 
     def __init__(self, client: McpClient | None) -> None:
         self.client = client
@@ -133,24 +132,59 @@ class SlackLiveProvider:
     async def collect_evidence(self, customer_name: str) -> list[Evidence]:
         if self.client is None:
             return []
-        text = await self.client.call_tool(self.SEARCH_TOOL, {self.SEARCH_ARG: customer_name})
-        return _evidence(EvidenceSource.SLACK, EvidenceCategory.COMMUNICATION, text, f"slack:{customer_name}")
+        # Prefer search; some twin tokens lack search scope, so fall back to reading channels.
+        try:
+            text = await self.client.call_tool(self.SEARCH_TOOL, {self.SEARCH_ARG: customer_name, "limit": 20})
+            if text:
+                return _evidence(EvidenceSource.SLACK, EvidenceCategory.COMMUNICATION, text, f"slack:{customer_name}")
+        except Exception:  # noqa: S110, BLE001 - fall through to channel read
+            pass
+        return await self._collect_via_channels(customer_name)
 
-    async def _send(self, target: str, body: str) -> ActionResult:
+    async def _collect_via_channels(self, customer_name: str) -> list[Evidence]:
+        try:
+            listed = await self.client.call_tool("slack_list_channels", {"limit": 30})
+        except Exception:  # noqa: BLE001
+            listed = None
+        names = [c.get("name") for c in (listed or {}).get("channels", []) if c.get("name")] if isinstance(listed, dict) else []
+        if not names:
+            names = ["renewals", "general"]
+
+        needle = customer_name.lower()
+        evidence: list[Evidence] = []
+        for channel in names[:8]:
+            try:
+                read = await self.client.call_tool("slack_read_channel", {"channel": channel, "limit": 50})
+            except Exception:  # noqa: S112, BLE001
+                continue
+            messages = read.get("messages", []) if isinstance(read, dict) else []
+            for msg in messages:
+                text = str(msg.get("text", ""))
+                if needle in text.lower():
+                    evidence.extend(
+                        _evidence(EvidenceSource.SLACK, EvidenceCategory.COMMUNICATION, text, f"slack:{channel}:{msg.get('ts')}")
+                    )
+        return evidence
+
+    async def _send(self, channel: str, body: str) -> ActionResult:
         if self.client is None:
             return ActionResult(action_id="", success=False, message="Slack not connected", executed_at=_now())
-        result = await self.client.call_tool(self.SEND_TOOL, {"target": target, "message": body})
-        ref = result.get("ref") or result.get("ts") if isinstance(result, dict) else None
-        return ActionResult(
-            action_id="", success=bool(ref), external_reference=ref,
-            message=f"Slack message sent to {target}", executed_at=_now(),
-        )
+        try:
+            result = await self.client.call_tool(self.SEND_TOOL, {"channel": channel, "text": body})
+            ref = None
+            if isinstance(result, dict):
+                ref = result.get("ts") or (result.get("message") or {}).get("ts") or result.get("channel")
+            return ActionResult(
+                action_id="", success=result is not None,
+                external_reference=str(ref) if ref else None,
+                message=f"Slack message sent to {channel}", executed_at=_now(),
+            )
+        except Exception as exc:  # noqa: BLE001 - record failure, do not abort the run
+            return ActionResult(action_id="", success=False, message=f"Slack send failed: {exc}", executed_at=_now())
 
-    async def _get(self, reference: str) -> dict[str, Any] | None:
-        if self.client is None:
-            return None
-        result = await self.client.call_tool(self.GET_TOOL, {"reference": reference})
-        return result if isinstance(result, dict) else None
+    async def _get(self, _reference: str) -> dict[str, Any] | None:
+        # The Slack twin has no get-message-by-reference tool; verification degrades gracefully.
+        return None
 
     async def send_internal_message(self, channel: str, message: str) -> ActionResult:
         return await self._send(channel, message)

@@ -32,7 +32,7 @@ def mock_server():
         return f"HubSpot: {query} renewal marked closed-lost."
 
     @m.tool
-    async def search_messages(query: str) -> str:
+    async def slack_search_messages(query: str, limit: int = 20) -> str:
         return f"Slack: CSM flagged onboarding friction for {query}."
 
     @m.tool
@@ -46,14 +46,10 @@ def mock_server():
         return store.get(task_id, {})
 
     @m.tool
-    async def send_message(target: str, message: str) -> dict:
-        ref = f"msg_{len(store) + 1}"
-        store[ref] = {"ref": ref, "target": target, "message": message}
-        return store[ref]
-
-    @m.tool
-    async def get_message(reference: str) -> dict:
-        return store.get(reference, {})
+    async def slack_send_message(channel: str, text: str) -> dict:
+        ts = f"{len(store) + 1}.000"
+        store[ts] = {"ts": ts, "channel": channel, "text": text}
+        return store[ts]
 
     return m
 
@@ -83,8 +79,6 @@ async def test_slack_send_and_read(mock_server):
 
     sent = await provider.send_internal_message("#renewals", "heads up")
     assert sent.success and sent.external_reference
-    msg = await provider.get_message(sent.external_reference)
-    assert msg["target"] == "#renewals"
 
 
 async def test_missing_connection_degrades():
