@@ -1,0 +1,51 @@
+[project]
+name = "revive-backend"
+version = "0.1.0"
+description = "Revive: AI-powered revenue recovery agent. FastAPI (client) + FastMCP (MCP server)."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    # Agent / workflow
+    "langgraph>=0.2.50",
+    "langchain-core>=0.3",
+    # MCP server (Revive exposed as MCP). Upstream MCP clients added when wiring live integrations.
+    "fastmcp>=2.0",
+    # LLM access via HuggingFace.
+    "langchain-huggingface>=0.1",
+    "huggingface-hub>=0.25",
+]
+
+[project.optional-dependencies]
+# Persistence (added in build step 7).
+db = [
+    "langgraph-checkpoint-postgres>=2.0",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+    "sqlalchemy>=2.0",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "cryptography>=43.0",
+]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "ruff>=0.7", "httpx>=0.27"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint.per-file-ignores]
+# Fixtures use static naive datetimes for deterministic demo data - tz not relevant.
+"app/integrations/seed/fixtures.py" = ["DTZ001"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
