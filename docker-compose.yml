@@ -1,10 +1,12 @@
-# Revive local infrastructure.
-# Postgres backs LangGraph checkpoints (durable investigation state) and future app tables.
-# Data persists in the named volume across restarts.
+# Revive stack: Postgres + backend + a Cloudflare quick tunnel that gives a public HTTPS URL.
 #
-#   docker compose up -d        # start
-#   docker compose down         # stop (keeps data)
-#   docker compose down -v      # stop and wipe data
+#   docker compose up -d --build          # start everything
+#   docker compose logs -f cloudflared    # find the public https://<name>.trycloudflare.com URL
+#   docker compose down                   # stop (keeps data)
+#   docker compose down -v                # stop and wipe the database
+#
+# Share the trycloudflare URL with the frontend (set NEXT_PUBLIC_API_BASE to it). No Redis:
+# the backend does not use it (Postgres is the only stateful dependency).
 
 services:
   postgres:
@@ -25,6 +27,32 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  backend:
+    build: ./backend
+    container_name: revive-backend
+    restart: unless-stopped
+    # Secrets (HF_TOKEN, LANGCHAIN_*, REVIVE_SECRET_KEY, ARGA_API_KEY) come from backend/.env.
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override the DB URL for the compose network (service name + internal port).
+      REVIVE_DATABASE_URL: postgresql://revive:revive@postgres:5432/revive
+      REVIVE_DATA_SOURCE: ${REVIVE_DATA_SOURCE:-seed}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Public HTTPS URL for the backend without port-forwarding. The URL is printed in the logs.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: revive-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://backend:8000
+    depends_on:
+      - backend
 
 volumes:
   revive_pgdata:
